@@ -4,33 +4,29 @@
 
 ---
 
-## 1. 注入点不同
+## 1. 注入点：`system` 在 `messages[]` 里，不在顶层
 
-| | MiniMax | DeepSeek |
-|---|---|---|
-| API 形状 | Anthropic Messages | OpenAI Chat Completions |
-| `system` 在哪 | 顶层 `system` 字符串 | `messages[]` 里一条 `{"role":"system"}` |
+DeepSeek 走 OpenAI Chat Completions 形状，交付契约必须写进 `messages[]` 里一条
+`{"role":"system"}` 消息。
 
-只改顶层 `system` 的插件**在 DeepSeek 上完全没有效果**，而且不报错：注册成功、
-日志正常、请求照发、效果为零。这是静默失效，也是「明明装了破甲层却对 DeepSeek
-没用」最常见的原因。
+**为什么这条排第一**：只改顶层 `system` 字符串的插件，在 DeepSeek 上**完全没有效果，
+而且不报错** —— 注册成功、日志正常、请求照发、效果为零。这是静默失效，
+也是「明明装了破甲层却对 DeepSeek 没用」最常见的原因。
 
-所以插件带两个独立注入器：
+所以插件带两个独立注入器，按**模型名**（不是 provider 名）分流：
 
 ```
-_openai_inject_system(request, kernel, replace=...)   # DeepSeek
-inject_anthropic(request, kernel, effort)             # MiniMax
+_openai_inject_system(request, kernel, replace=...)   # DeepSeek：messages[] 里的 system
+inject_anthropic(request, kernel, effort)             # Anthropic 形状：顶层 system
 ```
 
-`_llm_request` 按**模型名**在两者之间选，不是按 provider 名 —— 因为 Hermes 报出来的
-provider 可能是 `custom`，而它照样指向 DeepSeek。
+按模型名而不是 provider 名，是因为 Hermes 报出来的 provider 可能是 `custom`，
+而它照样指向 DeepSeek。
 
----
+## 2. 不加授权声明（实测负收益）
 
-## 2. 授权声明在 DeepSeek 上是负收益
-
-在 MiniMax 上，把授权声明追加到 user 消息末尾是决定性杠杆。在 DeepSeek 上它让结果
-**更差**。
+把「我方自有系统 / 已获书面授权」这类声明追加到 user 消息末尾，在 DeepSeek 上会让结果
+**更差** —— 这一点和 Anthropic 形状的模型恰好相反。
 
 模型自己 `reasoning_content` 里的原话：
 
