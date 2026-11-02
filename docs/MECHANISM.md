@@ -1,4 +1,4 @@
-# 机制 —— 为什么 DeepSeek 不等于 MiniMax
+# 机制 —— 本内核的五个决策
 
 本文每一条都是在真实 API 上测出来的，原始记录在 `data/`。
 
@@ -48,7 +48,7 @@ DeepSeek 的 `max_tokens` 覆盖**推理 + 正文**。模型先烧 reasoning tok
 | 16000 | 844 字拒答 |
 | 32000 | 47590 字，零拒答 |
 
-代理把 DeepSeek 请求独立抬到 32000，与 MiniMax 的下限（16000）分开。
+代理把 DeepSeek 请求抬到 32000。
 如果客户端自己设了更大的值，不会被降低。
 
 ---
@@ -59,7 +59,7 @@ OpenAI 形状的请求没有 `thinking` / `output_config` / `budget_tokens`。�
 `reasoning_effort` 或 `enable_thinking` 会被**上游静默忽略** —— HTTP 200、
 不报错、行为不变。在这上面调参数是浪费时间。
 
-思考控制是 MiniMax 专属杠杆（`output_config.effort` + `thinking: {type: adaptive}`）。
+思考控制属于 Anthropic 形状（`output_config.effort` + `thinking: {type: adaptive}`），不在本形状上。
 
 ---
 
@@ -84,7 +84,7 @@ _m_req = request.get("model")   # 实际发出去的
 就按非目标路由处理，请求原样发出。这堵住了「fallback 把非白名单模型送出去」的窗口。
 
 白名单与**上游路由**是两回事：不在白名单的 DeepSeek 模型**照样**会发到 DeepSeek
-端点，只是不注入内核。这一点搞错会把 `deepseek-v4-pro` 的流量发到 MiniMax，
+端点，只是不注入内核。这一点搞错会把流量发到错误的上游，
 然后大声报错。
 
 ---
@@ -140,7 +140,6 @@ hermes sessions refresh-prompts
 ## 7. 路由判定汇总
 
 ```
-模型名含 "minimax"  -> MiniMax 路径（顶层 system、授权块、adaptive effort）
 模型名含 "deepseek" -> DeepSeek 路径（messages[] system、无授权块、32000 下限）
    └─ 在白名单？ 是 -> 注入内核
                   否 -> 路由到 DeepSeek，不注入

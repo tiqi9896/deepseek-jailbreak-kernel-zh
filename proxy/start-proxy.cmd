@@ -1,5 +1,5 @@
 @echo off
-REM Idempotent launcher for the MiniMax jailbreak proxy (cmd variant).
+REM Idempotent launcher for the DeepSeek jailbreak proxy (cmd variant).
 REM Skips starting if the proxy is already healthy on :8790.
 setlocal
 

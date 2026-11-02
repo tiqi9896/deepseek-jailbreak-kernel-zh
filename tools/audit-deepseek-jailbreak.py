@@ -42,7 +42,7 @@ def _find_hermes_home() -> Path:
 
 
 HERMES = _find_hermes_home()
-PLUGIN_DIR = HERMES / "plugins" / "minimax-jailbreak-core"
+PLUGIN_DIR = HERMES / "plugins" / "deepseek-jailbreak-core"
 LOG = HERMES / "logs" / "gateway.log"
 DB = HERMES / "state.db"
 ENV = HERMES / ".env"
@@ -58,10 +58,10 @@ def check(ok: bool, name: str, detail: str = "") -> None:
 
 def load_plugin():
     spec = importlib.util.spec_from_file_location(
-        "minimax_jailbreak_core", PLUGIN_DIR / "__init__.py",
+        "deepseek_jailbreak_core", PLUGIN_DIR / "__init__.py",
         submodule_search_locations=[str(PLUGIN_DIR)])
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["minimax_jailbreak_core"] = mod
+    sys.modules["deepseek_jailbreak_core"] = mod
     spec.loader.exec_module(mod)
     return mod
 

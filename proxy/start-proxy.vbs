@@ -1,4 +1,4 @@
-' Launch the MiniMax jailbreak proxy (hidden, idempotent).
+' Launch the DeepSeek jailbreak proxy (hidden, idempotent).
 '
 ' Put this file in the proxy's own directory; it resolves proxy.py next to itself.
 ' The Windows login item calls THIS file by absolute path.

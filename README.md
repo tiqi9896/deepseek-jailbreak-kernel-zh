@@ -8,11 +8,11 @@
 
 ---
 
-## 为什么 DeepSeek 要用和 MiniMax 完全不同的机制
+## 本内核的五个决策
 
 两个 provider 不能互换。下面每一条都是实测出来的，不是推断。
 
-| | MiniMax（Anthropic 形状） | DeepSeek（OpenAI 形状） |
+| | 本内核（OpenAI 形状） |
 |---|---|---|
 | `system` 在哪 | 顶层 `system` 字符串 | `messages[]` 里一条 `role: "system"` |
 | 授权声明 | **决定性杠杆**，放在 user 消息末尾 | **负收益** —— 模型会点名它并否定其效力 |
@@ -75,7 +75,7 @@ prompt 与参数层面的杠杆**已经穷尽**。八类全部实测，全部无
 
 ```bash
 git clone https://github.com/<you>/deepseek-jailbreak-kernel-zh.git
-cp -r deepseek-jailbreak-kernel-zh/plugin ~/.hermes/plugins/minimax-jailbreak-core
+cp -r deepseek-jailbreak-kernel-zh/plugin ~/.hermes/plugins/deepseek-jailbreak-core
 ```
 
 ```bash
@@ -83,8 +83,8 @@ cp -r deepseek-jailbreak-kernel-zh/plugin ~/.hermes/plugins/minimax-jailbreak-co
 echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash' >> ~/.hermes/.env
 
 # 热重载，不重启会话
-hermes plugins disable minimax-jailbreak-core
-hermes plugins enable minimax-jailbreak-core
+hermes plugins disable deepseek-jailbreak-core
+hermes plugins enable deepseek-jailbreak-core
 ```
 
 ### 2. 代理（给外部 Agent）
@@ -102,7 +102,7 @@ DEEPSEEK_API_KEY=sk-... python proxy.py
 | Anthropic Messages | `/anthropic/v1/messages` |
 | OpenAI Responses | `/v1/responses` |
 
-上游按 **model 名**选：含 `deepseek` 走 DeepSeek 端点，其余走 MiniMax。
+本代理只服务 DeepSeek，上游固定为 DeepSeek 端点。
 
 ---
 

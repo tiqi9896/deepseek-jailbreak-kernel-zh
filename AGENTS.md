@@ -52,10 +52,10 @@ proxy/multiround.py
 ## 第 2 步 —— 装插件
 
 插件是让**每一个 Hermes 里跑 `deepseek-flash` 的对话**都带内核的那部分。
-目录名必须是 `minimax-jailbreak-core`（模块名是固定的，改名就注册不上）。
+目录名必须是 `deepseek-jailbreak-core`（模块名是固定的，改名就注册不上）。
 
 ```bash
-cp -r plugin "$HERMES_HOME/plugins/minimax-jailbreak-core"
+cp -r plugin "$HERMES_HOME/plugins/deepseek-jailbreak-core"
 ```
 
 然后设白名单。只针对 `deepseek-flash`：
@@ -68,14 +68,14 @@ grep -q 'HERMES_JAILBREAK_DEEPSEEK_MODELS' "$HERMES_HOME/.env" \
 热重载，不要重启用户的会话：
 
 ```bash
-hermes plugins disable minimax-jailbreak-core
-hermes plugins enable minimax-jailbreak-core
+hermes plugins disable deepseek-jailbreak-core
+hermes plugins enable deepseek-jailbreak-core
 ```
 
 **检查点 3**：跑离线自测。它不联网。
 
 ```bash
-python "$HERMES_HOME/plugins/minimax-jailbreak-core/selftest.py"
+python "$HERMES_HOME/plugins/deepseek-jailbreak-core/selftest.py"
 ```
 
 期望：`133 通过, 0 失败`。**只要有一项失败就停下来，把失败的断言名报出来**，

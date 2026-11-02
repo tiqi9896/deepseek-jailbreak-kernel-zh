@@ -4,7 +4,7 @@
 
 做四件事：
   1. 同步运行态插件/技能副本 → <知识库>/01-核心资产/
-  2. 查 state.db：哪些 MiniMax session 的持久化 prompt 里没有内核
+  2. 查 state.db：哪些 DeepSeek session 的持久化 prompt 里没有内核
   3. 查插件启用状态 / 配置
   4. 更新破甲库 _STATE.md 的「巡检快照」小节
 
@@ -30,7 +30,7 @@ from pathlib import Path
 # ★ 公开包里不能用本机绝对路径（别人跑不起来 + 泄漏目录结构）。
 #   JB_HOME        知识库根（默认 <repo>/../知识库 或 家目录/知识库）
 #   JB_HERMES_HOME Hermes 根（默认 <repo>/../../hermes 或 家目录/hermes）
-#   JB_PLUGIN_DIR  插件目录（默认 <hermes>/plugins/minimax-jailbreak-core）
+#   JB_PLUGIN_DIR  插件目录（默认 <hermes>/plugins/deepseek-jailbreak-core）
 #   JB_SKILL_DIR   技能目录
 #   JB_PROXY       代理脚本
 #   JB_STATE_DB    state.db
@@ -81,7 +81,7 @@ def _find_hermes_home() -> Path:
     #   ⇒ 不能只按「state.db + skills」判，否则会选到用户级目录，
     #   它的 sessions 表结构不同 ⇒ 巡检报「no such column」。
     for c in cands:
-        if (c / "plugins" / "minimax-jailbreak-core").is_dir():
+        if (c / "plugins" / "deepseek-jailbreak-core").is_dir():
             return c.resolve()
     # ★ 发行仓库场景（公开包）：没有 Hermes 安装 ⇒ 「根」就是仓库自身
     if _is_dist_repo(_REPO):
@@ -146,7 +146,7 @@ def _pick_source(env_name: str, hermes_sub: str, repo_sub: str) -> Path:
 
 
 PLUGIN_SRC = _pick_source("JB_PLUGIN_DIR",
-                          "plugins/minimax-jailbreak-core",
+                          "plugins/deepseek-jailbreak-core",
                           "plugin")
 SKILL_SRC = _pick_source("JB_SKILL_DIR",
                          "skills/software-development/llm-refusal-bypass",
@@ -157,16 +157,16 @@ def _find_proxy_src() -> Path:
     if e and Path(e).exists():
         return Path(e)
     for c in (_REPO / "proxy" / "proxy.py",
-              HERMES_HOME / "scripts" / "minimax-jailbreak-proxy" / "proxy.py",
+              HERMES_HOME / "scripts" / "deepseek-jailbreak-proxy" / "proxy.py",
               HERMES_HOME / "proxy" / "proxy.py"):
         if c.exists():
             return c
-    return HERMES_HOME / "scripts" / "minimax-jailbreak-proxy" / "proxy.py"
+    return HERMES_HOME / "scripts" / "deepseek-jailbreak-proxy" / "proxy.py"
 
 
 PROXY_SRC = _find_proxy_src()
 DB = os.environ.get("JB_STATE_DB") or str(HERMES_HOME / "state.db")
-PLUGIN_DST = KB / "01-核心资产/插件/minimax-jailbreak-core"
+PLUGIN_DST = KB / "01-核心资产/插件/deepseek-jailbreak-core"
 SKILL_DST = KB / "01-核心资产/技能包/llm-refusal-bypass"
 STATE = KB / "_STATE.md"
 
@@ -198,7 +198,7 @@ def sync_tree(src: Path, dst: Path) -> str:
 
 
 def check_sessions() -> tuple[list, list, int]:
-    """返回 (无内核的 session 列表, 非 minimax 的 session 列表, minimax 总数)"""
+    """返回 (无内核的 session 列表, 非 deepseek 的 session 列表, deepseek 总数)"""
     # ★ 发行仓库里没有 Hermes 安装 ⇒ 没有 state.db / 没有 sessions 表
     #   ⇒ 跳过而不是崩（崩会让公开版巡检永远 rc=1）。
     if not os.path.exists(DB):
@@ -214,7 +214,7 @@ def check_sessions() -> tuple[list, list, int]:
     rows = cur.execute("SELECT id, model, system_prompt_hash FROM sessions").fetchall()
     for sid, model, h in rows:
         m = str(model or "")
-        if "minimax" not in m.lower():
+        if "deepseek" not in m.lower():
             non_mini.append((sid, m))
             continue
         total_mini += 1
@@ -266,7 +266,7 @@ def _plugins_from_config():
 
 
 def check_plugin() -> tuple[bool, str]:
-    name = "minimax-jailbreak-core"
+    name = "deepseek-jailbreak-core"
     enabled_list, disabled_list = _plugins_from_config()
     if enabled_list is not None:
         on = name in enabled_list and name not in (disabled_list or [])
@@ -290,7 +290,7 @@ def check_gateway_log() -> list:
     if not log.exists():
         return []
     lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
-    hits = [l for l in lines[-3000:] if "minimax-jailbreak-core" in l]
+    hits = [l for l in lines[-3000:] if "deepseek-jailbreak-core" in l]
     return hits[-5:]
 
 
@@ -455,7 +455,7 @@ def main() -> int:
 
     # 2. session 内核覆盖
     no_kernel, non_mini, total_mini = check_sessions()
-    print(f"[{now}] MiniMax session 总数: {total_mini} · 持久化 prompt 缺内核: {len(no_kernel)}")
+    print(f"[{now}] DeepSeek session 总数: {total_mini} · 持久化 prompt 缺内核: {len(no_kernel)}")
     for sid, m in no_kernel[:10]:
         print(f"    - {sid}  ({m})")
 
@@ -596,7 +596,7 @@ def main() -> int:
     # 5.6 双仓库远端一致性（★ 2026-11-01）
     # 英文仓库 + 中文仓库必须都有 main 分支、且各自语言体检通过。
     print(f"[{now}] 双仓库远端一致性:")
-    _repos = ["tiqi9896/minimax-jailbreak-kernel", "tiqi9896/minimax-jailbreak-kernel-zh"]
+    _repos = ["tiqi9896/deepseek-jailbreak-kernel", "tiqi9896/deepseek-jailbreak-kernel-zh"]
     # ★ 2026-11-02：本机 git 走 https 时配了 http.https://github.com.proxy=127.0.0.1:3067，
     #   3067（karingService）一旦上游不通就 **TLS handshake failed** ⇒ git ls-remote
     #   假失败，而仓库其实好好的（gh api 能直接问到 main）。
@@ -639,10 +639,10 @@ def main() -> int:
             f"- **最后巡检**：{now}\n"
             f"- 插件副本同步：{'已同步' if '✗' not in p1 + p2 else '★失败'}\n"
             f"- 插件启用：**{'enabled' if enabled else '★未启用'}**\n"
-            f"- MiniMax session 总数 **{total_mini}**，"
+            f"- DeepSeek session 总数 **{total_mini}**，"
             f"持久化 prompt 缺内核 **{len(no_kernel)}**"
             f"（**非告警**：重建分支每请求重写 system，实际请求必带内核；"
-            f"非 MiniMax session {len(non_mini)} 个不适用内核）\n"
+            f"非 DeepSeek session {len(non_mini)} 个不适用内核）\n"
             f"- 内核预算：{kb_detail}\n"
             f"- 语料过滤器口径：{'OK' if cf_ok else '★' + cf_detail}\n"
             f"- 外部代理：{'OK' if px_ok else '★不可达'}\n"
