@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# never commit credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# runtime artefacts
+*.log
+proxy.log
+state.db
+*-shm
+*-wal
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

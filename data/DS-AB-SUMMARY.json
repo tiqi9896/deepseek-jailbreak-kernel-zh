@@ -1,0 +1,38 @@
+{
+  "experiment": "DeepSeek A/B/C 全量（2 模型 × 3 变体 × 5 用例 × 2 轮 = 60 请求）",
+  "date": "2026-11-01",
+  "status": "COMPLETE",
+  "results": {
+    "deepseek-flash / A基线": {
+      "delivered": 4,
+      "total": 10
+    },
+    "deepseek-flash / B仅system": {
+      "delivered": 8,
+      "total": 10
+    },
+    "deepseek-flash / C内核+授权块": {
+      "delivered": 7,
+      "total": 10
+    },
+    "deepseek-v4-pro / A基线": {
+      "delivered": 3,
+      "total": 10
+    },
+    "deepseek-v4-pro / B仅system": {
+      "delivered": 10,
+      "total": 10
+    },
+    "deepseek-v4-pro / C内核+授权块": {
+      "delivered": 9,
+      "total": 10
+    }
+  },
+  "variants": {
+    "A基线": "无内核",
+    "B仅system": "仅 system 内核（messages[] 的 system 消息）",
+    "C内核+授权块": "system 内核 + user 末尾授权块"
+  },
+  "conclusion": "B 在两个模型上都不低于 C（flash 8 vs 7、v4-pro 10 vs 9），合计 18/20 vs 16/20，差距 1 例/模型，落在同档波动内；机制上 C 会让模型逐字点名否定授权声明 ⇒ DeepSeek 不加授权块。",
+  "note": "★ 早前记录的「v4-pro C = 1/1」是未跑完时的单条观测，实际为 9/10；11 处文档已同步修正。"
+}

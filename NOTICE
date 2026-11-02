@@ -1,0 +1,16 @@
+本项目包含派生自以下项目的工作：
+
+  hermes-jailbreak-kernel
+  https://github.com/Enchanted0911/hermes-jailbreak-kernel
+  MIT License, Copyright (c) Enchanted0911
+
+上游建立了面向 Anthropic 形状请求的「请求层内核注入」方法。本项目在其基础上扩展：
+
+  - 面向 OpenAI 形状 messages[] 的独立注入器（DeepSeek）
+  - DeepSeek 专属实测与由此得出的机制决策
+    （不加授权块、32000 输出下限、模型白名单）
+  - 针对「每会话冻结的插件段」的指纹式内核版本校验
+  - 带判定谓词与诚实回退的多轮升级
+  - 三协议代理 + 按 model 名选上游
+
+按 MIT 条款保留上游署名。
