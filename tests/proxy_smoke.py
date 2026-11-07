@@ -18,9 +18,9 @@
 
 ★ 它**不需要 API key**：不带鉴权头发一发，看到 401 也算「路径是通的」。
 
-★ 它**顺便验证白名单**：用 DeepSeek 公开 API 的真实 model id
-  （`deepseek-flash`）发请求。如果代理日志里 kernel=N，说明白名单没放行
-  真实 id —— 那正是 2026-11-07 那个「装完像什么都没装」的根因。
+★ 它**顺便验证白名单**：用真实的 model id（`deepseek-flash`）以及任意别的
+  `deepseek*` id 各发一个请求。如果代理日志里 kernel=N，说明白名单没放行它们
+  —— 那正是 2026-11-07 那个「装完像什么都没装」的根因。
 
 退出码：0 = 代理活着且请求路径通；1 = 有问题。
 """
@@ -32,9 +32,12 @@ import sys
 import urllib.error
 import urllib.request
 
-# ★★ DeepSeek 公开 API 上真实存在的 model id。
-#    2026-11-07 事故的根因：默认白名单只有 `deepseek-flash`（Hermes 内部别名），
-#    公开 API 上没有这个 id ⇒ 用真实 id 的外部 agent 全都拿不到内核。
+# ★★ 要验证的白名单行为：
+#    · `deepseek-flash` —— DeepSeek 真实存在的 model id（本仓库实测数据为证）
+#    · `deepseek-next`  —— **占位**：任意**别的** deepseek* id，用来验证
+#      「默认放行所有 deepseek* 模型」这条规则（新出的模型不用改配置）
+#    2026-11-07 事故的根因：默认白名单**只写了一个** id ⇒ 任何配成别的
+#    DeepSeek model id 的外部 agent 全都拿不到内核，且全程不报错。
 REAL_MODEL_IDS = ("deepseek-flash", "deepseek-next")
 
 
@@ -105,9 +108,9 @@ def main() -> int:
         print(f"  [WARN] 带 key 请求 HTTP {status}: {text[:200]}")
         print("        ⇒ 上游可能返回了别的错误，看代理日志里的 status= 行。")
 
-    # 4) ★ 白名单检查：用 DeepSeek 公开 API 的真实 model id 各发一发。
+    # 4) ★ 白名单检查：真实 model id + 任意别的 deepseek* id 各发一发。
     #    它们必须走到**同一个处理路径**（不是 404「模型不支持」）。
-    print("\n  白名单检查（DeepSeek 公开 API 的真实 model id）：")
+    print("\n  白名单检查（真实 model id + 任意别的 deepseek* id）：")
     bad = 0
     for mid in REAL_MODEL_IDS:
         status, text, err = probe(
@@ -132,7 +135,7 @@ def main() -> int:
         print(f"\n  结论：✗ 有 {bad} 项异常 —— 见上面。")
         return 1
 
-    print("\n  结论：代理活着，请求路径通，真实 model id 也能路由。")
+    print("\n  结论：代理活着，请求路径通，真实 model id 与其它 deepseek* id 都能路由。")
     print("  接下来确认**内核是否生效**：看代理日志每行开头的 kernel=Y，")
     print("  以及 injections 计数是否随请求增长。")
     print("  ★ 若日志里 kernel=N ⇒ 白名单没放行该 model id —— "

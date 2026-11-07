@@ -1288,7 +1288,7 @@ def _self_test_end_to_end(check) -> bool:
             got = False
             if received:
                 got = has_kernel(json.dumps(received[-1]["body"], ensure_ascii=False))
-            check(f"真实 model id {model} 拿到内核", got,
+            check(f"真实 model id / 其它 deepseek* id 拿到内核: {model}", got,
                   f"status={status} received={len(received)}")
 
         # ③ 拒绝名单里的模型不注入内核
