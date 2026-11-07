@@ -187,8 +187,8 @@ _PLUGIN_CONTEXT_RE = re.compile(r"^## Plugin Context: .*?(?=^## |\Z)", re.S | re
 _DEEPSEEK_MODEL_RE = re.compile(r"deepseek", re.I)
 # ★★ DeepSeek 内核**生效模型范围**（2026-11-07 修正）：
 #   默认放行所有 `deepseek*` 模型；`deepseek-v4-pro` 刻意不放行。
-#   （2026-11-01 的「只要 deepseek-flash」是按 Hermes 内部档位别名定的，
-#     而 DeepSeek 公开 API 上没有这个 id ⇒ 外部 agent 全都拿不到内核。）
+#   （2026-11-07 实测：默认白名单**只写了一个** model id ⇒ 任何配成别的
+#     DeepSeek model id 的 agent 拿不到内核。id 本身是真的，问题在于太窄。）
 #   ⇒ 白名单外的 deepseek 模型（如 deepseek-v4-pro）**不注入内核**、
 #     **不加授权块** ⇒ 它走「非目标路由」路径，与未装内核时一致。
 #   ★ 为什么不用 config.yaml 的 `providers.deepseek.models` 列表控制：
@@ -197,11 +197,12 @@ _DEEPSEEK_MODEL_RE = re.compile(r"deepseek", re.I)
 #   ★ 配置项：`.env` 的 `HERMES_JAILBREAK_DEEPSEEK_MODELS`（逗号分隔，实时可改）。
 #     留空 = 不对任何 DeepSeek 模型注入内核。
 # ★★ 默认值是**空** = 允许所有 deepseek* 模型（减去拒绝名单）。
-#   ★★ 2026-11-07 实测事故：默认值原来是 "deepseek-flash" ——
-#      那是 Hermes 内部的档位别名，**DeepSeek 公开 API 上根本没有这个 model id**
-#      （公开的是 deepseek-chat / deepseek-reasoner）。
-#      ⇒ 用真实 model id 的所有外部 agent 请求时，插件**不注入内核**
-#        ⇒ 效果为零，而且日志里看不出异常。
+#   ★★ 2026-11-07 实测事故：默认值原来**只写了一个** model id
+#      （"deepseek-flash" —— 它是真实的 DeepSeek model id；真实 id 是
+#      deepseek-flash 与 deepseek-v4-pro，本仓库实测数据与 /v1/models 列表为证）。
+#      问题不是 id 是假的，而是**白名单太窄**：
+#      ⇒ 任何配成**别的** DeepSeek model id 的外部 agent 请求时，
+#        插件**不注入内核** ⇒ 效果为零，而且日志里看不出异常。
 #   ⇒ 现在：
 #      · HERMES_JAILBREAK_DEEPSEEK_MODELS 没设 ⇒ 允许所有 deepseek* 模型
 #      · 设了 ⇒ 只认这份白名单（Hermes 侧可继续写 `deepseek-flash`）
@@ -454,7 +455,7 @@ def set_effort(session_id: str, level: str) -> None:
        和 `status()` 都在调它 ⇒ 任何一次 `/jailbreak` 都抛
        `NameError: name 'effective_effort' is not defined`。
     ★ DeepSeek 的 OpenAI 形状**没有** effort 参数（思考档由 model id 决定：
-       deepseek-chat / deepseek-reasoner），请求层也不消费它；
+       deepseek-flash / deepseek-next），请求层也不消费它；
        真正影响 DeepSeek 的是**输出下限 32000**（思考与正文共用预算）。
        ⇒ 这里只做「记录 + 回显」，不改请求。
     """
@@ -602,7 +603,7 @@ def _llm_request(request: dict, **context: Any) -> dict:
         #
         # ★★ **白名单**：只有范围内的 DeepSeek 模型才走内核路径。
         #   （2026-11-07 修正：默认放行所有 deepseek* 模型（公开 API 的真实
-        #    id 是 deepseek-chat / deepseek-reasoner），只排除 deepseek-v4-pro。）
+        #    id 是 deepseek-flash / deepseek-next），只排除 deepseek-v4-pro。）
         #   白名单外的 deepseek 模型（如 v4-pro）走「非目标路由」：
         #   **不注入内核、不加授权块** ⇒ 与未装内核时行为一致。
         # ★ 两个 model 来源都判：**实际发出去的是 request["model"]**，

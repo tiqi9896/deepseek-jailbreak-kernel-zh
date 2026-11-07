@@ -1,23 +1,97 @@
 # 更新日志
 
+---
+
+## 1.1.1 — 2026-11-07
+
+**两个让 Claude Code 与 Codex CLI 完全用不了的协议 bug，
+外加对 v1.1.0 说明的一处事实更正。**
+
+### 协议形状必须跟着客户端走
+
+`provider_of()` 恒返回 `"deepseek"`（本代理只服务 DeepSeek），
+于是旧路由把**每一个** DeepSeek 请求都改写成 OpenAI 形状、发往
+`/chat/completions`，再把 OpenAI 形状的响应**原样**回传：
+
+```
+POST /anthropic/v1/messages  ->  https://api.deepseek.com/chat/completions
+POST /v1/responses           ->  https://api.deepseek.com/chat/completions
+```
+
+后果：
+
+* **Claude Code**（Anthropic Messages）拿到的是 `{"choices":[...]}`，
+  而不是 `{"content":[{"type":"text",...}]}` —— **它根本解析不了**。
+* **Codex CLI**（OpenAI Responses）拿到的是 Chat Completions 的响应体，
+  而它的 `input` 数组**从头到尾没被转换**。
+* Anthropic 请求的顶层 `system` 被发给了 OpenAI 端点。
+
+DeepSeek 三种形状都有**原生端点**（本机 codex 模型目录 2026-09-20 对真实
+API 实测记录）：
+
+| 客户端协议 | DeepSeek 原生端点 |
+|---|---|
+| OpenAI Chat Completions | `https://api.deepseek.com` + `/chat/completions` |
+| Anthropic Messages | `https://api.deepseek.com/anthropic` + `/v1/messages` |
+| OpenAI Responses | `https://api.deepseek.com/v1` + `/responses` |
+
+现在每种协议打到**自己的同形状端点**，响应同形状回来，**完全不需要形状转换**。
+新增两个选项：`--deepseek-anthropic-upstream`、`--deepseek-responses-upstream`。
+
+每种形状也各有自己的注入器 —— `system` 在三种形状里位置不同，
+而且 DeepSeek 上**一律不加授权块**（实测负收益：`deepseek-flash` 8/10 → 7/10）：
+
+| 形状 | 内核落在哪 |
+|---|---|
+| OpenAI Chat Completions | `messages[]` 里一条 `role:"system"` 消息 |
+| Anthropic Messages | 顶层 `system` 字段（放 `role:"system"` 消息会被该端点拒） |
+| OpenAI Responses | 顶层 `instructions` 字段 |
+
+### 多轮升级把内核丢掉了
+
+`_maybe_multiround` 从 `body["system"]` 里把内核取回来 —— 那是**只有 Anthropic
+形状才有的字段**。OpenAI 形状的内核在 `messages[]` 的一条 `role:"system"` 消息里，
+Responses 形状的在 `instructions` 里 ⇒ 取回来是**空字符串**
+⇒ 升级轮次**完全不带内核**发出去（`payload["messages"]` 被裸历史覆盖）。
+
+现在按形状取回内核（`_kernel_of`）并**每轮都带上**；
+`_history_for` 同时把对话历史转成目标形状。
+
+### 对 v1.1.0 说明的更正
+
+v1.1.0 里写「`deepseek-flash` 是 Hermes 内部档位别名，公开 API 上不存在」
+—— **那是错的**：它是真实的 DeepSeek model id，本仓库自己的实测数据与
+自己的 `/v1/models` 列表都能证明。真正的缺陷是**白名单只写了一个 id**，
+不是 id 是假的。示例里的 model id 已全部更正，根因段已重写。
+
+### 验证
+
+* `proxy/proxy.py --self-test` —— **125 项检查，0 失败**（原 116），新增断言：
+  Anthropic 请求落在 `/v1/messages` 且内核在顶层 `system`、没有 `role:"system"`
+  消息；Responses 请求落在 `/responses` 且内核在 `instructions`。
+* 把路由改回去 ⇒ 这些断言立刻 FAIL（2 条）—— 回归测试有牙齿。
+
 ## 1.1.0 — 2026-11-07
 
 **这一版修掉了「内核看起来完全没生效」的原因。**
 反馈说把仓库交给十几种 agent（DSH、Hermes、openclaw……）都没成功。
 原因是实测出来的，不是猜的。
 
-### 根因一 —— 默认白名单写了一个不存在的 model id
+### 根因一 —— 默认白名单只写了一个 model id
 
-默认白名单是 `deepseek-flash`。那是 **Hermes 内部的档位别名**，
-**DeepSeek 公开 API 上根本没有这个 id** —— 公开的是 `deepseek-chat`
-和 `deepseek-reasoner`。
+默认白名单**只写了一个** model id。
 
-于是所有真实 agent 的请求照样被路由到 DeepSeek（名字里含 `deepseek`），
-但**从不注入内核**，也不抬输出下限。全程不报错：`/health` 是 200，
-自检全绿，答案正常返回。行为跟什么都没装**一模一样**。
+DeepSeek 真实的 model id 是 `deepseek-flash` 与 `deepseek-v4-pro` ——
+本仓库自己的实测数据（`data/DS-E2E-FLASH-MT32000-20261101.json`，2026-11-01
+的真实请求）和它自己的 `/v1/models` 列表用的都是它们。
+**id 从来不是假的，问题在于白名单太窄。**
 
-* 现在默认放行**所有 `deepseek*` 的 model id** —— `deepseek-chat`、
-  `deepseek-reasoner`、`deepseek-v3.2` …… —— `deepseek-v4-pro` 仍然不放行
+于是任何配成**别的** DeepSeek model id 的 agent，请求照样被路由到 DeepSeek
+（名字里含 `deepseek`），但**从不注入内核**，也不抬输出下限。全程不报错：
+`/health` 是 200，自检全绿，答案正常返回。行为跟什么都没装**一模一样**。
+
+* 现在默认放行**所有 `deepseek*` 的 model id**（新出的 DeepSeek 模型不用改
+  配置就能用），`deepseek-v4-pro` 仍然不放行
   （这是当初刻意保留的决定，现在依然保留）。
 * 显式设白名单的行为不变：设了就收窄。
 * 新增拒绝名单 `HERMES_JAILBREAK_DEEPSEEK_MODELS_DENY` /
@@ -62,7 +136,7 @@ DeepSeek 的 OpenAI 形状根本没有 effort 参数（思考档由 model id 决
 * 内核到了上游，输出下限是 32000
 * 鉴权头被转发
 * 没 key 时返回 401，不是崩
-* **`deepseek-chat` 和 `deepseek-reasoner` 确实拿到内核**
+* **`deepseek-flash` 和 `deepseek-next` 确实拿到内核**
 * 被拒绝的模型（`deepseek-v4-pro`）不拿内核
 
 把白名单默认值改回去，其中 5 条断言立刻失败 —— 这个回归测试是有牙齿的。
@@ -77,7 +151,7 @@ DeepSeek 的 OpenAI 形状根本没有 effort 参数（思考档由 model id 决
 * `AGENTS.md` 和 `proxy/README.md` 不再包含本机路径。
 * `AGENTS.md` 第 1 步里的 `https://github.com/<owner>/deepseek-jailbreak-kernel.git`
   是字面占位符，根本 clone 不了 —— 已换成真实 URL。
-* `AGENTS.md` 检查点 3 写的是 `133 通过`，但插件只有 24 条断言 —— 跑对了反而像失败。
+* `AGENTS.md` 检查点 3 写的是 `133 通过`，但插件只有 22 条断言 —— 跑对了反而像失败。
   现在门槛与实际一致。
 * `install.ps1` 存为**带 BOM 的 UTF-8**：Windows PowerShell 5.1 否则按本地 ANSI
   代码页读 `.ps1`，中文字节被搞坏，解析器直接报 `ParserError`。
@@ -93,8 +167,8 @@ DeepSeek 的 OpenAI 形状根本没有 effort 参数（思考档由 model id 决
 
 ### 验证
 
-* `plugin/selftest.py` —— 24 项断言，0 失败。
-* `proxy/proxy.py --self-test` —— 116 项检查，0 失败，含真实 HTTP 往返
+* `plugin/selftest.py` —— 22 项断言，0 失败。
+* `proxy/proxy.py --self-test` —— 125 项检查，0 失败，含真实 HTTP 往返
   与 model 名路由断言。
 * `tools/audit-deepseek-jailbreak.py` —— 13 项检查，0 失败；
   插件缺失时也不再崩溃。

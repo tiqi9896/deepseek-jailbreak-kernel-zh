@@ -13,9 +13,11 @@
 
 ## ★ 先读这一段 —— 白名单是整件事的关键
 
-**2026-11-07 实测。** 这个仓库发布时，默认白名单写的是 `deepseek-flash`。
-这个字符串是 **Hermes 内部的档位别名**，**DeepSeek 公开 API 上根本没有这个
-model id** —— 公开的是 `deepseek-chat` 和 `deepseek-reasoner`。
+**2026-11-07 实测。** 这个仓库发布时，默认白名单**只写了一个** model id。
+
+DeepSeek 真实的 model id 是 `deepseek-flash` 与 `deepseek-v4-pro` ——
+本仓库自己的实测数据（2026-11-01 的真实请求）和它自己的 `/v1/models` 列表
+用的都是它们。**id 从来不是假的，问题在于白名单太窄。**
 
 后果，就是「换了十几种 agent 都没成功」那个症状：
 
@@ -28,10 +30,14 @@ model id** —— 公开的是 `deepseek-chat` 和 `deepseek-reasoner`。
 
 于是 agent 装完所有东西，健康检查全绿，而行为**跟什么都没装一模一样**。
 
+⇒ 现在默认放行**所有 `deepseek*` 的 model id**（新出的 DeepSeek 模型不用改配置
+就能用）；`deepseek-v4-pro` 仍由**显式的拒绝名单**排除 ——
+2026-11-01 钦定的「只要 deepseek-flash，不要 deepseek-v4-pro」保持不变。
+
 **同一天的第二个坑。** 代理优先从 `HERMES_HOME/.env` 读配置。所以**装了
 Hermes 的机器上**，代理会**继承** Hermes 的
 `HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash` ⇒ 外部 agent 用
-`deepseek-chat` 依然拿不到内核。现在代理和插件**各用各的变量**，互不串味：
+`deepseek-flash` 依然拿不到内核。现在代理和插件**各用各的变量**，互不串味：
 
 | 组件 | 白名单变量 | 拒绝名单 |
 |---|---|---|
@@ -40,17 +46,17 @@ Hermes 的机器上**，代理会**继承** Hermes 的
 
 **现在的默认值（什么都不用配）：**
 
-* 所有 `deepseek*` 的 model id 都放行 —— `deepseek-chat`、`deepseek-reasoner`、
-  `deepseek-v3.2`、`deepseek-flash` ……
+* 所有 `deepseek*` 的 model id 都放行 —— `deepseek-flash`、`deepseek-next`、
+  `deepseek-next`、`deepseek-flash` ……
 * `deepseek-v4-pro` **不放行**（这是当初刻意保留的决定；确实要的话显式加回来）。
 
 只有当你要**收窄**范围时才设白名单，例如：
 
 ```bash
 # 插件侧
-echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner' >> "$HERMES_HOME/.env"
+echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash,deepseek-next' >> "$HERMES_HOME/.env"
 # 代理侧
-export JBP_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner
+export JBP_DEEPSEEK_MODELS=deepseek-flash,deepseek-next
 ```
 
 **除非你的 model id 真的是 `deepseek-flash`，否则不要把它写进白名单。**
@@ -120,7 +126,7 @@ cp -r plugin "$HERMES_HOME/plugins/deepseek-jailbreak-core"
 ### 白名单 —— 先读上面那一段
 
 **默认什么都不用设。** 默认放行所有 `deepseek*` 的 model id，
-包括 DeepSeek 公开的真实 id（`deepseek-chat`、`deepseek-reasoner`）。
+包括 DeepSeek 公开的真实 id（`deepseek-flash`、`deepseek-next`）。
 只有 `deepseek-v4-pro` 不放行。
 
 如果人类自己的 Hermes 配置里已经有 `deepseek-flash` 白名单（他们自己的选择），
@@ -128,7 +134,7 @@ cp -r plugin "$HERMES_HOME/plugins/deepseek-jailbreak-core"
 
 ```bash
 grep -q 'HERMES_JAILBREAK_DEEPSEEK_MODELS' "$HERMES_HOME/.env" \
-  || echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner' >> "$HERMES_HOME/.env"
+  || echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash,deepseek-next' >> "$HERMES_HOME/.env"
 ```
 
 热重载，不要重启用户的会话：
@@ -144,7 +150,7 @@ hermes plugins enable deepseek-jailbreak-core
 python "$HERMES_HOME/plugins/deepseek-jailbreak-core/selftest.py"
 ```
 
-期望：`24 通过, 0 失败`。**只要有一项失败就停下来，把失败的断言名报出来**，
+期望：`22 通过, 0 失败`。**只要有一项失败就停下来，把失败的断言名报出来**，
 不要继续往下走。
 
 ---
@@ -217,7 +223,7 @@ python tools/audit-deepseek-jailbreak.py -v
 |---|---|---|
 | `plugin found` | `HERMES_HOME` 猜错了 | 显式设 `HERMES_HOME` 环境变量 |
 | `middleware registration logged` | 插件没被加载 | 查 `config.yaml` 里插件是否列出并 enabled |
-| `real public model id admitted: deepseek-chat` | 白名单把真实公开 id 排除了 | 读上面那一段 —— 白名单才是整件事的关键 |
+| `real public model id admitted: deepseek-flash` | 白名单把真实公开 id 排除了 | 读上面那一段 —— 白名单才是整件事的关键 |
 | `plugin found` FAIL | 插件没装到 `$HERMES_HOME/plugins/deepseek-jailbreak-core` | 把 `plugin/` 拷过去 |
 | 路由类检查失败 | 插件版本不对 | 重新 clone，路由逻辑在 `_llm_request` 里 |
 

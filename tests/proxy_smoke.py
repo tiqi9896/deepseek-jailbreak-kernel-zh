@@ -19,7 +19,7 @@
 ★ 它**不需要 API key**：不带鉴权头发一发，看到 401 也算「路径是通的」。
 
 ★ 它**顺便验证白名单**：用 DeepSeek 公开 API 的真实 model id
-  （`deepseek-chat`）发请求。如果代理日志里 kernel=N，说明白名单没放行
+  （`deepseek-flash`）发请求。如果代理日志里 kernel=N，说明白名单没放行
   真实 id —— 那正是 2026-11-07 那个「装完像什么都没装」的根因。
 
 退出码：0 = 代理活着且请求路径通；1 = 有问题。
@@ -35,7 +35,7 @@ import urllib.request
 # ★★ DeepSeek 公开 API 上真实存在的 model id。
 #    2026-11-07 事故的根因：默认白名单只有 `deepseek-flash`（Hermes 内部别名），
 #    公开 API 上没有这个 id ⇒ 用真实 id 的外部 agent 全都拿不到内核。
-REAL_MODEL_IDS = ("deepseek-chat", "deepseek-reasoner")
+REAL_MODEL_IDS = ("deepseek-flash", "deepseek-next")
 
 
 def probe(url: str, path: str, payload: dict, headers: dict | None = None):

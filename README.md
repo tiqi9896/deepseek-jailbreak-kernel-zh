@@ -3,8 +3,8 @@
 面向 **DeepSeek** 模型的请求层非拒绝交付层，外带一个协议无关的 HTTP 代理，
 让任何外部 Agent 拿到同样的行为。
 
-> 范围：所有 `deepseek*` 的 model id 都在范围内 —— `deepseek-chat`、
-> `deepseek-reasoner`、`deepseek-v3.2` …… `deepseek-v4-pro` **故意不进白名单** ——
+> 范围：所有 `deepseek*` 的 model id 都在范围内 —— `deepseek-flash`、
+> `deepseek-next`、`deepseek-next` …… `deepseek-v4-pro` **故意不进白名单** ——
 > 请求照旧路由到 DeepSeek 端点，但不注入内核。
 
 ---
@@ -49,12 +49,18 @@ reasoning token 和正文 token 共用一份预算。16000 时模型把预算烧
 
 ## ★ 白名单（先读这一段）
 
-**2026-11-07 实测。** 这里发布的默认白名单是 `deepseek-flash` ——
-一个 **DeepSeek 公开 API 上根本不存在的 Hermes 内部档位别名**
-（公开的是 `deepseek-chat` 和 `deepseek-reasoner`）。
+**2026-11-07 实测。** 这里发布的默认白名单**只写了一个** model id。
 
-于是所有真实 agent 的请求**路由到了 DeepSeek，却没拿到内核**，而且全程不报错：
-`/health` 是 200，自检全绿，答案也正常返回。行为跟什么都没装一模一样。
+DeepSeek 真实的 model id 是 `deepseek-flash` 与 `deepseek-v4-pro` ——
+本仓库自己的实测数据（2026-11-01 的真实请求）和代理自己的 `/v1/models`
+列表用的都是它们。**id 从来不是假的，问题在于白名单太窄。**
+
+于是任何配成**别的** DeepSeek model id 的 agent，请求**路由到了 DeepSeek，
+却没拿到内核**，32000 输出下限也没抬。而且全程不报错：`/health` 是 200，
+自检全绿，答案也正常返回。行为跟什么都没装一模一样。
+
+⇒ 现在默认放行**所有 `deepseek*` 的 model id**；`deepseek-v4-pro` 仍然排除，
+但改由**显式的拒绝名单**负责。
 
 同一天的第二个坑：代理优先读 `HERMES_HOME/.env`，所以**装了 Hermes 的机器上**
 它**继承**了 Hermes 的 `HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash`，
@@ -67,8 +73,8 @@ reasoning token 和正文 token 共用一份预算。16000 时模型把预算烧
 | Hermes 插件 | `HERMES_JAILBREAK_DEEPSEEK_MODELS` | `HERMES_JAILBREAK_DEEPSEEK_MODELS_DENY` |
 | 外部 agent 用的代理 | `JBP_DEEPSEEK_MODELS` | `JBP_DEEPSEEK_MODELS_DENY` |
 
-开箱即用：所有 `deepseek*` 的 model id 都放行 —— `deepseek-chat`、
-`deepseek-reasoner`、`deepseek-v3.2` …… —— `deepseek-v4-pro` 不放行（刻意保留）。
+开箱即用：所有 `deepseek*` 的 model id 都放行 —— `deepseek-flash`、
+`deepseek-next`、`deepseek-next` …… —— `deepseek-v4-pro` 不放行（刻意保留）。
 只有在要**收窄**范围时才需要配白名单。
 
 ---
@@ -131,9 +137,9 @@ cp -r deepseek-jailbreak-kernel-zh/plugin ~/.hermes/plugins/deepseek-jailbreak-c
 
 ```bash
 # 白名单 —— 可选。默认已经放行所有 deepseek* 的 model id
-# （deepseek-chat、deepseek-reasoner……）；deepseek-v4-pro 不放行。
+# （deepseek-flash、deepseek-next……）；deepseek-v4-pro 不放行。
 # 只有要「收窄」时才设，而且要写真实存在的 model id：
-echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner' >> ~/.hermes/.env
+echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash,deepseek-next' >> ~/.hermes/.env
 
 # 热重载，不重启会话
 hermes plugins disable deepseek-jailbreak-core
@@ -162,7 +168,7 @@ DEEPSEEK_API_KEY=sk-... python proxy.py
 ## 验证
 
 ```bash
-python plugin/selftest.py            # 期望 24 通过, 0 失败
+python plugin/selftest.py            # 期望 22 通过, 0 失败
 python proxy/proxy.py --self-test    # 期望 全部通过
 python tools/audit-deepseek-jailbreak.py -v
 ```

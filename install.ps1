@@ -2,8 +2,8 @@
 #  DeepSeek jailbreak kernel - installer (Windows PowerShell)
 #
 #  . copies the plugin into $HERMES_HOME\plugins\deepseek-jailbreak-core
-#  . runs the plugin self-test  (24 assertions)
-#  . runs the proxy self-test   (116 checks, real HTTP against a local stub)
+#  . runs the plugin self-test  (22 assertions)
+#  . runs the proxy self-test   (125 checks, real HTTP against a local stub)
 #  . FAILS LOUDLY if either self-test does not pass
 #
 #  Usage:

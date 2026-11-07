@@ -37,29 +37,31 @@ check("reinforce section present", "DELIVERABLE FIDELITY" in kernel)
 check("within 8000-char budget", len(kernel) <= 8000, f"len={len(kernel)}")
 
 print("\n=== allowlist ===")
-# ★★ 2026-11-07 实测事故：默认白名单曾经只有 "deepseek-flash" ——
-#   那是 Hermes 内部的档位别名，**DeepSeek 公开 API 上根本没有这个 model id**
-#   （公开的是 deepseek-chat / deepseek-reasoner）。
-#   ⇒ 用真实 model id 的所有外部 agent 拿不到内核，效果为零，且日志看不出异常。
+# ★★ 2026-11-07 实测事故：默认白名单曾经**只写了一个** model id
+#   （"deepseek-flash" —— 它是真实的 DeepSeek model id；真实 id 是
+#   deepseek-flash 与 deepseek-v4-pro，本仓库实测数据与 /v1/models 列表为证）。
+#   问题不是 id 是假的，而是**白名单太窄**：
+#   ⇒ 任何配成**别的** DeepSeek model id 的外部 agent 拿不到内核，
+#     效果为零，且日志看不出异常。
 #   ⇒ 现在默认允许所有 deepseek* 模型（减去拒绝名单）。
-check("deepseek-flash allowlisted", mjc.deepseek_model_allowed("deepseek-flash"))
+# ★ DeepSeek 真实的 model id 是 deepseek-flash 与 deepseek-v4-pro
+#   （本仓库实测数据与 /v1/models 列表为证）。deepseek-v4-pro 按
+#   2026-11-01 的决定「只要 deepseek-flash，不要 deepseek-v4-pro」默认排除。
+check("real model id deepseek-flash allowlisted",
+      mjc.deepseek_model_allowed("deepseek-flash"))
 check("deepseek-v4-pro NOT allowlisted", not mjc.deepseek_model_allowed("deepseek-v4-pro"))
 check("other models NOT allowlisted", not mjc.deepseek_model_allowed("gpt-4o"))
-# ★ DeepSeek 公开 API 的真实 model id 必须默认放行
-check("real public id deepseek-chat allowlisted",
-      mjc.deepseek_model_allowed("deepseek-chat"))
-check("real public id deepseek-reasoner allowlisted",
-      mjc.deepseek_model_allowed("deepseek-reasoner"))
-check("other deepseek id allowlisted (deepseek-v3.2)",
-      mjc.deepseek_model_allowed("deepseek-v3.2"))
-# ★ 显式设了白名单 ⇒ 回到白名单模式（Hermes 侧可继续写 deepseek-flash）
+# ★ 默认放行**所有** deepseek* id（新出的模型不用改配置）
+check("any other deepseek* id allowlisted (deepseek-next)",
+      mjc.deepseek_model_allowed("deepseek-next"))
+# ★ 显式设了白名单 ⇒ 回到白名单模式（只认名单里的）
 import os as _os
 _saved = _os.environ.get("HERMES_JAILBREAK_DEEPSEEK_MODELS")
 _os.environ["HERMES_JAILBREAK_DEEPSEEK_MODELS"] = "deepseek-flash"
 try:
     check("explicit allowlist restricts to that list",
           mjc.deepseek_model_allowed("deepseek-flash")
-          and not mjc.deepseek_model_allowed("deepseek-chat"))
+          and not mjc.deepseek_model_allowed("deepseek-next"))
 finally:
     if _saved is None:
         _os.environ.pop("HERMES_JAILBREAK_DEEPSEEK_MODELS", None)

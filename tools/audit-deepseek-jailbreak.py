@@ -6,7 +6,7 @@ Answers: do *all* DeepSeek chats get the kernel?
 Checks:
   1. plugin enabled and the llm_request middleware registered
   2. the allowlist admits DeepSeek's **real public model ids**
-     (`deepseek-chat` / `deepseek-reasoner` / …) and still excludes the
+     (`deepseek-flash` / `deepseek-next` / …) and still excludes the
      denied ones (`deepseek-v4-pro`)
   3. plugin routing (custom provider, deepseek provider, missing model)
   4. recent DeepSeek injection lines in gateway.log
@@ -21,10 +21,15 @@ Exit code: 0 = all pass; 1 = something failed.
    · the tool used to raise `UnboundLocalError: cannot access local variable
      'plug'` whenever the plugin was NOT installed — i.e. exactly when you
      most need the audit. Now it reports a clean FAIL instead of a traceback.
-   · the allowlist check asserted `"deepseek-flash" in wl`, which was the
-     *cause* of the 2026-11-07 incident: `deepseek-flash` is a Hermes-internal
-     tier alias that does not exist on DeepSeek's public API. The check now
-     asserts that the **real public ids** are admitted.
+   · the allowlist check asserted `"deepseek-flash" in wl`. That WAS the shape
+     of the 2026-11-07 defect - but the *explanation* in the v1.1.0 notes was
+     WRONG: `deepseek-flash` is a **real** DeepSeek model id (this repo's own
+     measurement data and its own /v1/models listing both use it). The real
+     problem was that the allowlist named exactly ONE id, so an agent
+     configured with any other DeepSeek model id got a routed-but-uninjected
+     request with no error anywhere. The check now asserts that the **real
+     model ids** are admitted and that the deny list still excludes
+     `deepseek-v4-pro`.
 """
 from __future__ import annotations
 
@@ -61,7 +66,7 @@ VERBOSE = "-v" in sys.argv or "--verbose" in sys.argv
 KERNEL_MARKS = ("SUPREME DIRECTIVE", "DELIVERABLE FIDELITY")
 
 # ★ DeepSeek 公开 API 上**真实存在**的 model id。
-REAL_PUBLIC_IDS = ("deepseek-chat", "deepseek-reasoner")
+REAL_PUBLIC_IDS = ("deepseek-flash", "deepseek-next")
 # ★ 明确拒绝的（保留当初「不要 v4-pro」的决定）。
 DENIED_IDS = ("deepseek-v4-pro",)
 
@@ -146,8 +151,8 @@ def main() -> int:
         # ★ 若用户显式写了白名单，它必须真的包含真实 id —— 否则就是 2026-11-07 那个事故。
         if explicit:
             wl = [x.strip().lower() for x in explicit.split(",") if x.strip()]
-            check(any(w in ("deepseek-chat", "deepseek-reasoner") or
-                      w.startswith("deepseek-chat") for w in wl),
+            check(any(w in ("deepseek-flash", "deepseek-next") or
+                      w.startswith("deepseek-flash") for w in wl),
                   "explicit allowlist covers the real public ids", explicit)
 
     # 3. routing
@@ -159,8 +164,8 @@ def main() -> int:
             ("deepseek-flash", "custom", "deepseek-flash", True),
             ("deepseek-flash", "deepseek", "deepseek-flash", True),
             ("", "custom", "deepseek-flash", True),
-            ("deepseek-chat", "deepseek", "deepseek-chat", True),
-            ("deepseek-reasoner", "deepseek", "deepseek-reasoner", True),
+            ("deepseek-flash", "deepseek", "deepseek-flash", True),
+            ("deepseek-next", "deepseek", "deepseek-next", True),
             ("deepseek-v4-pro", "deepseek", "deepseek-v4-pro", False),
         ]
         for cm, cp, rm, want in cases:

@@ -39,6 +39,11 @@ except Exception:  # noqa: BLE001  发行包里缺模块时静默降级为关闭
 # ── 默认上游（国内站；国际站用 --upstream 覆盖）─────────────────────────
 # ★ DeepSeek 上游（OpenAI 兼容）——按请求里的 model 名自动路由
 DEFAULT_UPSTREAM = "https://api.deepseek.com"
+# ★★ 2026-11-07（v1.1.1）：DeepSeek 提供**原生 Anthropic 端点**与**原生
+#    Responses 端点**（本机 codex 模型目录 2026-09-20 实测记录）。
+#    少了这两个，Claude Code / Codex CLI 拿到的响应形状就是错的。
+DEFAULT_ANTHROPIC_UPSTREAM = "https://api.deepseek.com/anthropic"
+DEFAULT_RESPONSES_UPSTREAM = "https://api.deepseek.com/v1"
 
 # ── 内核与授权声明 ──────────────────────────────────────────────────────
 # 与 Hermes 插件（plugin/prompts/profiles/）共用同一份内核文案 ⇒ 行为一致。
@@ -217,29 +222,31 @@ def _read_kernel(name: str) -> str:
 # ★ provider 判定：按请求体的 model 名（★ 模型名优先于路径）
 # ★★ DeepSeek 内核**生效模型范围**（2026-11-07 修正）：
 #   默认放行所有 `deepseek*` 模型；`deepseek-v4-pro` 刻意不放行。
-#   （2026-11-01 的「只要 deepseek-flash」是按 Hermes 内部档位别名定的，
-#     而 DeepSeek 公开 API 上没有这个 id ⇒ 外部 agent 全都拿不到内核。）
+#   （2026-11-07 实测：默认白名单**只写了一个** model id ⇒ 任何配成别的
+#     DeepSeek model id 的 agent 拿不到内核。id 本身是真的，问题在于太窄。）
 #   ★ 注意区分两件事：
 #     · **上游路由**（往哪个端点发）—— 按 "deepseek" 前缀判定，
 #       白名单外的模型**也要**路由到 DeepSeek 上游，否则请求会打错端点。
 #     · **内核注入**（要不要加内核/授权块）—— 按白名单判定，
 #       白名单外的模型**不注入**，与插件口径一致。
 # ★★ 默认值是**空** = 允许所有 deepseek* 模型（减去拒绝名单）。
-#   ★★ 2026-11-07 实测事故：默认值原来是 "deepseek-flash" ——
-#      那是 Hermes 内部的档位别名，**DeepSeek 公开 API 上根本没有这个 model id**
-#      （公开的是 deepseek-chat / deepseek-reasoner）。
-#      ⇒ 用真实 model id 的所有外部 agent（Cursor / Claude Code / OpenCode /
-#        Cline / Codex CLI / openclaw …）请求会被路由到 DeepSeek 上游，
-#        但**不注入内核、不抬输出下限** ⇒ 效果为零，而且日志里看不出异常。
+#   ★★ 2026-11-07 实测事故：默认值原来**只写了一个** model id
+#      （"deepseek-flash" —— 它是真实的 DeepSeek model id；本仓库实测数据与
+#      /v1/models 列表用的就是它，真实 id 是 deepseek-flash 与 deepseek-v4-pro）。
+#      问题不是 id 是假的，而是**白名单太窄**：
+#      ⇒ 任何配成**别的** DeepSeek model id 的外部 agent
+#        （Cursor / Claude Code / OpenCode / Cline / Codex CLI / openclaw …）
+#        请求会被路由到 DeepSeek 上游，但**不注入内核、不抬输出下限**
+#        ⇒ 效果为零，而且日志里看不出异常。
 #      这就是「换了十几种 agent 都没成功」的原因。
 #   ⇒ 现在：
 #      · JBP_DEEPSEEK_MODELS 没设 ⇒ 允许所有 deepseek* 模型
-#      · 设了 ⇒ 只认这份白名单（例：`deepseek-chat,deepseek-reasoner`）
+#      · 设了 ⇒ 只认这份白名单（例：`deepseek-flash,deepseek-next`）
 #      · JBP_DEEPSEEK_MODELS_DENY = 拒绝名单
 #        （默认 deepseek-v4-pro —— 保留当初「不要 v4-pro」的决定）
 #   ★ 代理**不读** HERMES_JAILBREAK_* —— 那是插件（Hermes 侧）的命名空间。
 #     混用会让这个给外部 agent 用的代理继承 Hermes 的 `deepseek-flash` 白名单，
-#     于是外部 agent 用 deepseek-chat 时依然拿不到内核（2026-11-07 实测）。
+#     于是外部 agent 用 deepseek-flash 时依然拿不到内核（2026-11-07 实测）。
 _DEEPSEEK_MODELS_DEFAULT = ""
 _DEEPSEEK_MODELS_DENY_DEFAULT = "deepseek-v4-pro"
 
@@ -260,7 +267,7 @@ def deepseek_model_allowed(model: str) -> bool:
     #   ★★ 2026-11-07 实测事故（第二个坑）：`_env_file()` 优先取 HERMES_HOME/.env，
     #      于是**装了 Hermes 的机器上，这个给外部 agent 用的代理会继承 Hermes 的
     #      HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash** ⇒
-    #      外部 agent 用 deepseek-chat 请求时依然拿不到内核 ⇒ 效果为零。
+    #      外部 agent 用 deepseek-flash 请求时依然拿不到内核 ⇒ 效果为零。
     #   ⇒ 代理与插件各用各的变量，互不串味。
     deny_raw = env_val("JBP_DEEPSEEK_MODELS_DENY", _DEEPSEEK_MODELS_DENY_DEFAULT)
     deny = [x.strip().lower() for x in str(deny_raw).split(",") if x.strip()]
@@ -337,6 +344,144 @@ def build_kernel(profile: str | None = None) -> str:
     prof = profile or env_profile()
     main_f, reinf_f = PROFILE_SPLIT.get(prof, PROFILE_SPLIT[DEFAULT_PROFILE])
     return _read_kernel(main_f) + "\n\n" + _read_kernel(reinf_f)
+
+
+def inject_deepseek_anthropic(body: dict, kernel: str,
+                              min_output_tokens: int = 0) -> dict:
+    """DeepSeek 注入（**Anthropic Messages** 形状）。
+
+    ★★ 2026-11-07 修复（v1.1.1）：DeepSeek 有**原生 Anthropic 端点**
+       `https://api.deepseek.com/anthropic` ⇒ 请求走 Anthropic 形状、
+       响应也是 Anthropic 形状 ⇒ **不需要任何形状转换**。
+
+    与 OpenAI 形状的三点差异（照抄 `inject_deepseek` 的决策）：
+      1. **system 是顶层字段**，不是 messages[] 里的一条 role=system 消息；
+         messages[] 里放 role=system 会被 Anthropic 形状的端点拒。
+      2. **不加授权块** —— DeepSeek 的拒答理由会点名授权声明并否定其效力
+         （实测 deepseek-flash 8/10 → 7/10）。
+      3. **不加 thinking / output_config** —— DeepSeek 的 OpenAI 形状没有这些参数。
+    """
+    try:
+        if min_output_tokens:
+            cur = int(body.get("max_tokens") or 0)
+            if cur < min_output_tokens:
+                body = dict(body)
+                body["max_tokens"] = min_output_tokens
+        sys_field = body.get("system")
+        if isinstance(sys_field, str):
+            if not has_kernel(sys_field):
+                body = dict(body)
+                body["system"] = sys_field.rstrip("\n") + "\n\n" + kernel
+        elif isinstance(sys_field, list):
+            texts = [b.get("text", "") for b in sys_field
+                     if isinstance(b, dict) and b.get("type") == "text"]
+            if not has_kernel("\n".join(texts)):
+                body = dict(body)
+                body["system"] = list(sys_field) + [{"type": "text", "text": kernel}]
+        else:
+            body = dict(body)
+            body["system"] = kernel
+        return body
+    except Exception:
+        return body
+
+
+def inject_deepseek_responses(body: dict, kernel: str,
+                               min_output_tokens: int = 0) -> dict:
+    """DeepSeek 注入（**OpenAI Responses** 形状，Codex CLI 等用它）。
+
+    ★★ 2026-11-07 修复（v1.1.1）：DeepSeek 有原生 Responses 端点
+       `https://api.deepseek.com/v1/responses` ⇒ 请求走 Responses 形状、
+       响应也是 Responses 形状 ⇒ **不需要任何形状转换**。
+
+    Responses 形状与 OpenAI 形状的差异：
+      · system 叫 `instructions`（顶层字符串），没有 role=system 消息；
+      · 用户内容在 `input` 数组里（`{role, content:[{type,text}]}`）。
+    ★ 同样**不加授权块**、**不加 reasoning/effort**（DeepSeek 形状没有）。
+    """
+    try:
+        if min_output_tokens:
+            for key in ("max_output_tokens", "max_tokens"):
+                cur = body.get(key)
+                if isinstance(cur, (int, float)) and cur < min_output_tokens:
+                    body = dict(body)
+                    body[key] = min_output_tokens
+        instr = body.get("instructions")
+        if isinstance(instr, str):
+            if not has_kernel(instr):
+                body = dict(body)
+                body["instructions"] = instr.rstrip("\n") + "\n\n" + kernel
+        else:
+            body = dict(body)
+            body["instructions"] = kernel
+        return body
+    except Exception:
+        return body
+
+
+def _kernel_of(body: dict, flavour: str) -> str:
+    """把请求里已经注入好的内核取回来（多轮升级每轮都要带上它）。
+
+    ★★ 2026-11-07 修复（v1.1.1）：旧实现只读 `body["system"]`，
+       而 OpenAI / Responses 形状的内核分别住在
+       `messages[] 里的一条 role=system 消息` 与 `instructions` 里
+       ⇒ 旧实现在这两种形状上取到空字符串 ⇒ **升级轮次完全不带内核**。
+    """
+    try:
+        if flavour == "anthropic":
+            s = body.get("system")
+            if isinstance(s, str):
+                return s
+            if isinstance(s, list):
+                return "\n".join(b.get("text", "") for b in s
+                                  if isinstance(b, dict) and b.get("type") == "text")
+            return ""
+        if flavour == "responses":
+            s = body.get("instructions")
+            return s if isinstance(s, str) else ""
+        msgs = body.get("messages")
+        if isinstance(msgs, list):
+            for m in msgs:
+                if isinstance(m, dict) and m.get("role") == "system":
+                    c = m.get("content")
+                    if isinstance(c, str):
+                        return c
+                    if isinstance(c, list):
+                        return "\n".join(b.get("text", "") for b in c
+                                         if isinstance(b, dict))
+        return ""
+    except Exception:
+        return ""
+
+
+def _history_for(history: list, flavour: str) -> list:
+    """把 OpenAI 形状的对话历史转成目标协议的形状。
+
+    · anthropic：messages[] 允许 `content` 是纯字符串 ⇒ **原样可用**，
+      只是**不能**塞 role=system（system 是顶层字段）。
+    · responses：`input` 里的 item 要用内容块数组。
+    """
+    out = []
+    for m in history or []:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        content = m.get("content")
+        if not isinstance(content, str):
+            if isinstance(content, list):
+                content = "\n".join(b.get("text", "") for b in content
+                                     if isinstance(b, dict) and b.get("type") in
+                                     ("text", "input_text", "output_text"))
+            else:
+                content = ""
+        if flavour == "responses":
+            btype = "output_text" if role == "assistant" else "input_text"
+            out.append({"role": role, "content": [{"type": btype, "text": content}]})
+        elif role == "system":
+            continue          # Anthropic：system 走顶层字段
+        else:
+            out.append({"role": role, "content": content})
+    return out
 
 
 def has_kernel(text: str) -> bool:
@@ -615,12 +760,21 @@ def _reply_text(data: bytes, flavour: str) -> str:
     choices = obj.get("choices")
     if isinstance(choices, list) and choices:
         return (choices[0].get("message") or {}).get("content") or ""
-    blocks = obj.get("content")
-    if isinstance(blocks, list):
-        return "".join(b.get("text", "") for b in blocks
-                       if isinstance(b, dict) and b.get("type") == "text")
     if isinstance(obj.get("output_text"), str):
         return obj["output_text"]
+    # ★ Responses 形状（2026-11-07 v1.1.1）：output[] 里的内容块
+    out = obj.get("output")
+    if isinstance(out, list):
+        parts = []
+        for item in out:
+            if not isinstance(item, dict):
+                continue
+            for b in (item.get("content") or []):
+                if isinstance(b, dict) and b.get("type") in (
+                        "output_text", "text", "input_text"):
+                    parts.append(b.get("text", ""))
+        if parts:
+            return "".join(parts)
     return ""
 
 
@@ -640,6 +794,15 @@ def _splice_reply(data: bytes, flavour: str, text: str) -> bytes:
         obj["stop_reason"] = "end_turn"
     elif isinstance(obj.get("output_text"), str):
         obj["output_text"] = text
+    elif isinstance(obj.get("output"), list):
+        # ★ Responses 形状（2026-11-07 v1.1.1）
+        for item in obj["output"]:
+            if not isinstance(item, dict):
+                continue
+            for b in (item.get("content") or []):
+                if isinstance(b, dict) and b.get("type") in (
+                        "output_text", "text", "input_text"):
+                    b["text"] = text
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
@@ -723,19 +886,43 @@ class Handler(BaseHTTPRequestHandler):
         prov = provider_of(body, flavour)
         ds_floor = self.cfg.get("deepseek_min_output_tokens") or 0
         if prov == "deepseek":
-            upstream = self.cfg.get("deepseek_upstream") + "/chat/completions"
-            flavour = "deepseek"
+            # ★★ 2026-11-07 修复（v1.1.1）：**协议形状必须跟着客户端走**。
+            #   旧实现把任何 deepseek 请求都改写成 OpenAI 形状、发往
+            #   /chat/completions，返回的也是 OpenAI 形状 ⇒
+            #   Claude Code（Anthropic Messages）与 Codex CLI（OpenAI Responses）
+            #   收到**根本解析不了的响应**（实测数据见 CHANGELOG v1.1.1）。
+            #   DeepSeek 三种形状都有**原生端点**（本机 codex 模型目录实测记录）：
+            #     OpenAI Chat Completions  https://api.deepseek.com           + /chat/completions
+            #     Anthropic Messages      https://api.deepseek.com/anthropic + /v1/messages
+            #     OpenAI Responses        https://api.deepseek.com/v1         + /responses
+            #   ⇒ 各自打到同形状的原生端点，响应原样回传，**无需形状转换**。
+            if flavour == "anthropic":
+                upstream = (self.cfg.get("deepseek_anthropic_upstream")
+                            or DEFAULT_ANTHROPIC_UPSTREAM) + "/v1/messages"
+            elif flavour == "responses":
+                upstream = (self.cfg.get("deepseek_responses_upstream")
+                            or DEFAULT_RESPONSES_UPSTREAM) + "/responses"
+            else:
+                upstream = self.cfg.get("deepseek_upstream") + "/chat/completions"
 
         try:
             if body:
                 kernel = build_kernel(self.cfg.get("profile"))
                 effort = self.cfg.get("effort") or env_effort()
                 before = json.dumps(body, ensure_ascii=False)
-                if flavour == "deepseek":
+                if prov == "deepseek":
                     # ★ 白名单外（如 deepseek-v4-pro）：**不注入内核**，
                     #   但仍路由到 DeepSeek 上游（端点不能错）。
                     if deepseek_model_allowed(str(body.get("model") or "")):
-                        body = inject_deepseek(body, kernel, ds_floor)
+                        # ★★ 每种形状用它自己的注入器（v1.1.1）：
+                        #   system 的位置不同（messages[] / 顶层 / instructions），
+                        #   而且 DeepSeek 上**一律不加授权块**。
+                        if flavour == "anthropic":
+                            body = inject_deepseek_anthropic(body, kernel, ds_floor)
+                        elif flavour == "responses":
+                            body = inject_deepseek_responses(body, kernel, ds_floor)
+                        else:
+                            body = inject_deepseek(body, kernel, ds_floor)
                     else:
                         injected["skipped"] = True
                 elif flavour == "anthropic":
@@ -885,19 +1072,29 @@ class Handler(BaseHTTPRequestHandler):
                          why, flavour, len(original))
         t0 = time.time()
         try:
-            sys_text = body.get("system")
-            if isinstance(sys_text, list):  # Anthropic 块数组
-                sys_text = "".join(b.get("text", "") for b in sys_text
-                                   if isinstance(b, dict))
-            # ★ 三轮共享内核；把内核放进每轮 messages 的首部（OpenAI 形状）
-            kernel = sys_text or ""
+            # ★★ 2026-11-07 修复（v1.1.1）：内核要**按形状**取回来。
+            #   旧实现只读 body["system"] —— 那是 Anthropic 形状才有的字段；
+            #   OpenAI 形状的内核在 messages[] 里的一条 role=system 消息，
+            #   Responses 形状的在 instructions 里。
+            #   ⇒ 旧实现在这两种形状上取到 "" ⇒ **升级轮次完全不带内核**，
+            #   而升级恰恰发生在最难的题材上。
+            kernel = _kernel_of(body, flavour)
 
             def call(history):
                 payload = dict(body)
                 payload.pop("stream", None)
-                payload["messages"] = (
-                    ([{"role": "system", "content": kernel}] if kernel else [])
-                    + history)
+                hist = _history_for(history, flavour)
+                if flavour == "anthropic":
+                    # system 是顶层字段；messages 里不能有 role=system
+                    payload["system"] = kernel
+                    payload["messages"] = hist
+                elif flavour == "responses":
+                    payload["instructions"] = kernel
+                    payload["input"] = hist
+                else:
+                    payload["messages"] = (
+                        ([{"role": "system", "content": kernel}] if kernel else [])
+                        + hist)
                 return _call_upstream_once(upstream, headers, payload)
 
             hint = (self.headers.get("X-Topic-Hint")
@@ -995,6 +1192,10 @@ def _self_test_end_to_end(check) -> bool:
             "anthropic_upstream": f"http://127.0.0.1:{stub_port}",
             "openai_upstream": f"http://127.0.0.1:{stub_port}",
             "deepseek_upstream": f"http://127.0.0.1:{stub_port}",
+            # ★ v1.1.1：三种形状各自的原生端点也要指到桩上游，
+            #   否则会回落到真实的 api.deepseek.com（自检就不离线了）。
+            "deepseek_anthropic_upstream": f"http://127.0.0.1:{stub_port}",
+            "deepseek_responses_upstream": f"http://127.0.0.1:{stub_port}",
             "api_key": "",
             "deepseek_api_key": "",
             "profile": "strict",
@@ -1054,7 +1255,7 @@ def _self_test_end_to_end(check) -> bool:
         # ① OpenAI 形状 —— 真实 DeepSeek model id
         received.clear()
         status, text = _post("/v1/chat/completions", {
-            "model": "deepseek-chat",
+            "model": "deepseek-flash",
             "messages": [{"role": "user", "content": "写个工具"}],
         }, {"Authorization": "Bearer client-key"})
         check("OpenAI 请求拿到 HTTP 响应（不是断连）", status is not None,
@@ -1078,7 +1279,7 @@ def _self_test_end_to_end(check) -> bool:
         # ② ★★ 路由断言：DeepSeek 公开 API 的**真实 model id** 必须拿到内核。
         #    （2026-11-07 实测事故：默认白名单只有 deepseek-flash ——
         #      公开 API 上根本没有这个 id ⇒ 外部 agent 全都拿不到内核。）
-        for model in ("deepseek-chat", "deepseek-reasoner"):
+        for model in ("deepseek-flash", "deepseek-next"):
             received.clear()
             status, text = _post("/v1/chat/completions", {
                 "model": model,
@@ -1105,7 +1306,7 @@ def _self_test_end_to_end(check) -> bool:
         # ④ Anthropic 形状
         n0 = len(received)
         status, text = _post("/anthropic/v1/messages", {
-            "model": "deepseek-chat", "max_tokens": 32000,
+            "model": "deepseek-flash", "max_tokens": 32000,
             "system": "You are a helpful assistant.",
             "messages": [{"role": "user", "content": "写个工具"}],
         }, {"x-api-key": "client-key"})
@@ -1115,14 +1316,57 @@ def _self_test_end_to_end(check) -> bool:
             check("Anthropic 请求带内核到上游", has_kernel(flat), flat[:200])
 
         # ⑤ Responses 形状（Codex CLI 等）
+        received.clear()
         status, text = _post("/v1/responses", {
-            "model": "deepseek-chat", "input": "写个工具",
+            "model": "deepseek-flash", "input": "写个工具",
         }, {"Authorization": "Bearer client-key"})
         check("Responses 请求返回 200", status == 200, f"status={status} body={text[:160]}")
+        if received:
+            sent = received[-1]
+            flat = json.dumps(sent["body"], ensure_ascii=False)
+            check("Responses 走原生 /responses 端点（不是 /chat/completions）",
+                  sent["path"].endswith("/responses") and
+                  not sent["path"].endswith("/chat/completions"),
+                  f"path={sent['path']}")
+            check("Responses 内核落在 instructions",
+                  has_kernel(str(sent["body"].get("instructions") or "")),
+                  flat[:200])
+            check("Responses 请求不含授权块（DeepSeek 上是靶子）",
+                  AUTH_MARKER not in flat, flat[:160])
+
+        # ⑤-b ★★ 协议形状必须跟着客户端走（2026-11-07 v1.1.1）
+        #   旧实现把所有 deepseek 请求都改写成 OpenAI 形状发往 /chat/completions，
+        #   返回的也是 OpenAI 形状 ⇒ Claude Code / Codex CLI 解析不了。
+        received.clear()
+        status, text = _post("/anthropic/v1/messages", {
+            "model": "deepseek-flash", "max_tokens": 32000,
+            "system": "You are a helpful assistant.",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        }, {"x-api-key": "client-key"})
+        check("Anthropic 请求返回 200", status == 200, f"status={status} body={text[:160]}")
+        if received:
+            sent = received[-1]
+            flat = json.dumps(sent["body"], ensure_ascii=False)
+            check("Anthropic 走原生 /v1/messages 端点（不是 /chat/completions）",
+                  sent["path"].endswith("/v1/messages") and
+                  not sent["path"].endswith("/chat/completions"),
+                  f"path={sent['path']}")
+            check("Anthropic 内核落在顶层 system",
+                  has_kernel(str(sent["body"].get("system") or "")),
+                  flat[:200])
+            check("Anthropic messages 里没有 role=system（该端点会拒）",
+                  not any(isinstance(m, dict) and m.get("role") == "system"
+                          for m in (sent["body"].get("messages") or [])),
+                  flat[:200])
+            check("Anthropic 请求不含授权块（DeepSeek 上是靶子）",
+                  AUTH_MARKER not in flat, flat[:160])
+            check("Anthropic 输出下限 32000",
+                  int(sent["body"].get("max_tokens") or 0) >= 32000,
+                  f"max_tokens={sent['body'].get('max_tokens')}")
 
         # ⑥ 没有 key ⇒ 401，不是崩
         status, text = _post("/v1/chat/completions", {
-            "model": "deepseek-chat",
+            "model": "deepseek-flash",
             "messages": [{"role": "user", "content": "写个工具"}],
         })
         check("无 key 时返回 401（不是崩溃）", status == 401,
@@ -1448,6 +1692,12 @@ def main() -> int:
                          "name contains 'deepseek' are routed here automatically.")
     ap.add_argument("--openai-upstream", default=DEFAULT_UPSTREAM,
                     help="同 --upstream，保留兼容")
+    ap.add_argument("--deepseek-anthropic-upstream", default=DEFAULT_ANTHROPIC_UPSTREAM,
+                    help="DeepSeek 原生 Anthropic 端点 base"
+                         "（默认 https://api.deepseek.com/anthropic）")
+    ap.add_argument("--deepseek-responses-upstream", default=DEFAULT_RESPONSES_UPSTREAM,
+                    help="DeepSeek 原生 OpenAI Responses 端点 base"
+                         "（默认 https://api.deepseek.com/v1）")
     ap.add_argument("--deepseek-key-env", default="DEEPSEEK_API_KEY",
                     help="env var holding a DeepSeek fallback key (used only when the "
                          "client sent none and the model name is a deepseek one).")
@@ -1484,6 +1734,8 @@ def main() -> int:
         "anthropic_upstream": args.anthropic_upstream.rstrip("/"),
         "openai_upstream": args.openai_upstream.rstrip("/"),
     "deepseek_upstream": args.deepseek_upstream.rstrip("/"),
+        "deepseek_anthropic_upstream": args.deepseek_anthropic_upstream.rstrip("/"),
+        "deepseek_responses_upstream": args.deepseek_responses_upstream.rstrip("/"),
         # ★ 走 env_val（.env 优先，实时）：启动脚本不加载 .env ⇒
         #   只读 os.environ 拿不到 key（实测 401）。
         "api_key": (env_val(args.api_key_env, "") if args.api_key_env else ""),
@@ -1507,9 +1759,9 @@ def main() -> int:
     srv.daemon_threads = True
     print(f"deepseek-jailbreak-proxy {__version__}")
     print(f"  监听        : http://{args.host}:{args.port}")
-    print(f"  Anthropic   : {cfg['anthropic_upstream']}/v1/messages")
-    print(f"  OpenAI      : {cfg['openai_upstream']}/chat/completions")
-    print(f"  DeepSeek    : {cfg['deepseek_upstream']}/chat/completions  (model 含 deepseek 时自动路由)")
+    print(f"  Anthropic   : {cfg['deepseek_anthropic_upstream']}/v1/messages  (原生 Anthropic 形状)")
+    print(f"  OpenAI      : {cfg['deepseek_upstream']}/chat/completions")
+    print(f"  Responses   : {cfg['deepseek_responses_upstream']}/responses  (原生 Responses 形状)")
     print(f"  profile     : {cfg['profile']}   effort: {cfg['effort']}")
     print(f"  输出下限    : {cfg['min_output_tokens'] or '不干预'}")
     print(f"  DeepSeek 下限: {cfg.get('deepseek_min_output_tokens') or '不干预'}")
