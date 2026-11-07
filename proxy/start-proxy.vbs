@@ -2,6 +2,9 @@
 '
 ' Put this file in the proxy's own directory; it resolves proxy.py next to itself.
 ' The Windows login item calls THIS file by absolute path.
+'
+' NOTE: the interpreter is NOT hard-coded - it probes py.exe / python.exe /
+' python3.exe and falls back to whatever is on PATH.
 Option Explicit
 
 Dim shell, fso, http, py, base, cmd, candidates, i
@@ -23,10 +26,9 @@ End If
 On Error GoTo 0
 Err.Clear
 
-' --- pick a python interpreter ---
+' --- pick a python interpreter (never hard-code a machine path) ---
 py = ""
-candidates = Array("C:\Python314\python.exe", "C:\Python313\python.exe", _
-                    "C:\Python312\python.exe", "C:\Python311\python.exe")
+candidates = Array("py.exe", "python.exe", "python3.exe")
 For i = 0 To UBound(candidates)
     If fso.FileExists(candidates(i)) Then
         py = candidates(i)
@@ -39,5 +41,5 @@ End If
 
 ' --- launch (hidden) ---
 shell.CurrentDirectory = base
-cmd = """" & py & """ proxy.py --port 8790 --verbose"
+cmd = Chr(34) & py & Chr(34) & " proxy.py --port 8790 --verbose"
 shell.Run cmd, 0, False

@@ -76,7 +76,7 @@ X-Topic-Hint: 文件加密工具（目录遍历 + AES 加密 + 密钥管理 + �
 或者放进 body：
 
 ```json
-{ "model": "deepseek-flash", "topic_hint": "...", "messages": [...] }
+{ "model": "deepseek-chat", "topic_hint": "...", "messages": [...] }
 ```
 
 **括号里那些字段才是关键。** 只说「文件加密工具」会得到一份合规审核系统。

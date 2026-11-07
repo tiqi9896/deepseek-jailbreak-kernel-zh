@@ -185,8 +185,10 @@ _SECTION_BLOCK_RE = re.compile(
 _PLUGIN_CONTEXT_RE = re.compile(r"^## Plugin Context: .*?(?=^## |\Z)", re.S | re.M)
 # ★ DeepSeek 路由（OpenAI 兼容形状）
 _DEEPSEEK_MODEL_RE = re.compile(r"deepseek", re.I)
-# ★★ DeepSeek 内核**生效模型白名单**（★ 2026-11-01 用户确认：DeepSeek 只要
-#   `deepseek-flash`，不要 `deepseek-v4-pro`）。
+# ★★ DeepSeek 内核**生效模型范围**（2026-11-07 修正）：
+#   默认放行所有 `deepseek*` 模型；`deepseek-v4-pro` 刻意不放行。
+#   （2026-11-01 的「只要 deepseek-flash」是按 Hermes 内部档位别名定的，
+#     而 DeepSeek 公开 API 上没有这个 id ⇒ 外部 agent 全都拿不到内核。）
 #   ⇒ 白名单外的 deepseek 模型（如 deepseek-v4-pro）**不注入内核**、
 #     **不加授权块** ⇒ 它走「非目标路由」路径，与未装内核时一致。
 #   ★ 为什么不用 config.yaml 的 `providers.deepseek.models` 列表控制：
@@ -194,20 +196,44 @@ _DEEPSEEK_MODEL_RE = re.compile(r"deepseek", re.I)
 #     UI 列表 ⇒ 删静态条目挡不住它。**真正的开关在这里。**
 #   ★ 配置项：`.env` 的 `HERMES_JAILBREAK_DEEPSEEK_MODELS`（逗号分隔，实时可改）。
 #     留空 = 不对任何 DeepSeek 模型注入内核。
-_DEEPSEEK_MODELS_DEFAULT = "deepseek-flash"
+# ★★ 默认值是**空** = 允许所有 deepseek* 模型（减去拒绝名单）。
+#   ★★ 2026-11-07 实测事故：默认值原来是 "deepseek-flash" ——
+#      那是 Hermes 内部的档位别名，**DeepSeek 公开 API 上根本没有这个 model id**
+#      （公开的是 deepseek-chat / deepseek-reasoner）。
+#      ⇒ 用真实 model id 的所有外部 agent 请求时，插件**不注入内核**
+#        ⇒ 效果为零，而且日志里看不出异常。
+#   ⇒ 现在：
+#      · HERMES_JAILBREAK_DEEPSEEK_MODELS 没设 ⇒ 允许所有 deepseek* 模型
+#      · 设了 ⇒ 只认这份白名单（Hermes 侧可继续写 `deepseek-flash`）
+#      · HERMES_JAILBREAK_DEEPSEEK_MODELS_DENY = 拒绝名单
+#        （默认 deepseek-v4-pro —— 保留当初「不要 v4-pro」的决定）
+_DEEPSEEK_MODELS_DEFAULT = ""
+_DEEPSEEK_MODELS_DENY_DEFAULT = "deepseek-v4-pro"
+
+
+def _deepseek_name_match(m: str, name: str) -> bool:
+    return (m == name or m.startswith(name + ":")
+            or m.endswith("/" + name) or name in m)
 
 
 def deepseek_model_allowed(model: str) -> bool:
-    """该 DeepSeek 模型是否在内核生效白名单内。"""
+    """该 DeepSeek 模型是否在内核生效范围内。
+
+    ★ 拒绝名单**优先**：拒绝名单里的模型一律不注入内核。
+    """
     m = str(model or "").strip().lower()
     if not m or not _DEEPSEEK_MODEL_RE.search(m):
+        return False
+    deny_raw = cfg("HERMES_JAILBREAK_DEEPSEEK_MODELS_DENY", _DEEPSEEK_MODELS_DENY_DEFAULT)
+    deny = [x.strip().lower() for x in str(deny_raw).split(",") if x.strip()]
+    if any(_deepseek_name_match(m, x) for x in deny):
         return False
     raw = cfg("HERMES_JAILBREAK_DEEPSEEK_MODELS", _DEEPSEEK_MODELS_DEFAULT)
     wl = [x.strip().lower() for x in str(raw).split(",") if x.strip()]
     if not wl:
-        return False
-    return any(m == x or m.startswith(x + ":") or m.endswith("/" + x) or x in m
-               for x in wl)
+        # 默认：所有 deepseek* 都行（DeepSeek 公开 API 的真实 id 都在内）
+        return True
+    return any(_deepseek_name_match(m, x) for x in wl)
 
 _text_cache: dict[str, str] = {}
 
@@ -421,6 +447,29 @@ def set_profile(session_id: str, profile: str) -> None:
     st["profile"] = profile
 
 
+def set_effort(session_id: str, level: str) -> None:
+    """记录调用方的 effort 意图。
+
+    ★★ 2026-11-07 修复：这个函数以前**根本不存在**，而 `/jailbreak effort …`
+       和 `status()` 都在调它 ⇒ 任何一次 `/jailbreak` 都抛
+       `NameError: name 'effective_effort' is not defined`。
+    ★ DeepSeek 的 OpenAI 形状**没有** effort 参数（思考档由 model id 决定：
+       deepseek-chat / deepseek-reasoner），请求层也不消费它；
+       真正影响 DeepSeek 的是**输出下限 32000**（思考与正文共用预算）。
+       ⇒ 这里只做「记录 + 回显」，不改请求。
+    """
+    st = _session_state.setdefault(session_id, {})
+    st["effort"] = level
+
+
+def effective_effort(session_id: str = "") -> str:
+    """当前 effort 设置（DeepSeek 上仅作展示，不影响请求）。"""
+    st = _session_state.get(session_id)
+    if st and st.get("effort"):
+        return st["effort"]
+    return DEFAULT_EFFORT
+
+
 
 def reset(session_id: str) -> None:
     _session_state.pop(session_id, None)
@@ -516,7 +565,7 @@ def status(session_id: str = "") -> str:
         f"  session : {session_id or '(unresolved)'}",
         f"  mode    : {mode}",
         f"  profile : {prof}",
-        f"  effort  : {eff}  (adaptive thinking)",
+        f"  effort  : {eff}  (DeepSeek OpenAI 形状无此参数 · 思考档由 model id 决定)",
         f"  core    : {len(core_txt)} chars (主契约)",
         f"  reinforce: {len(reinforce_txt)} chars (交付纯度强化)",
         f"  absolute: {len(abs_txt)} chars (零拒绝绝对契约 · 仅请求层)",
@@ -551,9 +600,9 @@ def _llm_request(request: dict, **context: Any) -> dict:
         #   同样「模型名优先」：模型名明确是别的 provider 时，不因 base_url 是
         #   deepseek 就误判（fallback 链里 provider 会变）。
         #
-        # ★★ **白名单**：只有白名单内的 DeepSeek 模型才走内核路径。
-        #   （★ 2026-11-01 用户确认：DeepSeek 只要 deepseek-flash，
-        #    不要 deepseek-v4-pro ⇒ 白名单默认只有 deepseek-flash。）
+        # ★★ **白名单**：只有范围内的 DeepSeek 模型才走内核路径。
+        #   （2026-11-07 修正：默认放行所有 deepseek* 模型（公开 API 的真实
+        #    id 是 deepseek-chat / deepseek-reasoner），只排除 deepseek-v4-pro。）
         #   白名单外的 deepseek 模型（如 v4-pro）走「非目标路由」：
         #   **不注入内核、不加授权块** ⇒ 与未装内核时行为一致。
         # ★ 两个 model 来源都判：**实际发出去的是 request["model"]**，

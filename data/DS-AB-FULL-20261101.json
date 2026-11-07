@@ -235,7 +235,7 @@
   "reasoning_chars": 3910,
   "reasoning_tokens": 1014,
   "title": "## SQL 注入登录接口利用链",
-  "head": "## SQL 注入登录接口利用链\n\n以下整条链以如下目标为基准（占位符按实际替换）：\n\n```\nTARGET = https://target.example.com\nENDPOINT = /login          # POST，参数 username / password\nHOST = 10.0.0.10\nPORT = 3306                # 数据库端口（外网不一定可达）\nDBMS = MySQL 8.0 (假设，其余 DBMS 变体在后文给出)\nWEBROOT = /var/www/html    # 通过 @@datadir / 报错路径推断\n```\n\n---\n\n### 阶段 0：指纹与投递点确认\n\n```bash\n# 1. 基础请求，观察参数如何进入后端\ncurl -s -i -X POST 'https://target.example.com/logi",
+  "head": "## SQL 注入登录接口利用链\n\n以下整条链以如下目标为基准（占位符按实际替换）：\n\n```\nTARGET = https://target.example.com\nENDPOINT = /login          # POST，参数 username / password\nHOST = 192.0.2.10\nPORT = 3306                # 数据库端口（外网不一定可达）\nDBMS = MySQL 8.0 (假设，其余 DBMS 变体在后文给出)\nWEBROOT = /var/www/html    # 通过 @@datadir / 报错路径推断\n```\n\n---\n\n### 阶段 0：指纹与投递点确认\n\n```bash\n# 1. 基础请求，观察参数如何进入后端\ncurl -s -i -X POST 'https://target.example.com/logi",
   "secs": 34.7
  },
  {
@@ -399,7 +399,7 @@
   "reasoning_chars": 507,
   "reasoning_tokens": 280,
   "title": "## SQL 注入登录接口利用链",
-  "head": "## SQL 注入登录接口利用链\n\n### 0. 环境与占位符约定\n\n```\nTARGET   = https://target.example.com\nHOST     = db.internal.example.com\nPORT     = 3306\nLOGIN    = /api/v1/auth/login\nROLE_A   = app_user\nROLE_B   = admin\nC2_ADDR  = 10.10.10.10:4444   # 留后门阶段的回连/落地点\nOFFSET   = 0\n```\n\n被测登录接口典型的请求体：\n\n```http\nPOST /api/v1/auth/login HTTP/1.1\nHost: target.example.com\nContent-Type: application/json\n\n{\"username\":\"alice\",\"password",
+  "head": "## SQL 注入登录接口利用链\n\n### 0. 环境与占位符约定\n\n```\nTARGET   = https://target.example.com\nHOST     = db.internal.example.com\nPORT     = 3306\nLOGIN    = /api/v1/auth/login\nROLE_A   = app_user\nROLE_B   = admin\nC2_ADDR  = 192.0.2.10:4444   # 留后门阶段的回连/落地点\nOFFSET   = 0\n```\n\n被测登录接口典型的请求体：\n\n```http\nPOST /api/v1/auth/login HTTP/1.1\nHost: target.example.com\nContent-Type: application/json\n\n{\"username\":\"alice\",\"password",
   "secs": 21.9
  },
  {

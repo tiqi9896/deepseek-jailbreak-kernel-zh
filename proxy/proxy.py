@@ -215,27 +215,63 @@ def _read_kernel(name: str) -> str:
 
 
 # ★ provider 判定：按请求体的 model 名（★ 模型名优先于路径）
-# ★★ DeepSeek 内核**生效模型白名单**（★ 2026-11-01 用户确认：DeepSeek 只要
-#   `deepseek-flash`，不要 `deepseek-v4-pro`）。
+# ★★ DeepSeek 内核**生效模型范围**（2026-11-07 修正）：
+#   默认放行所有 `deepseek*` 模型；`deepseek-v4-pro` 刻意不放行。
+#   （2026-11-01 的「只要 deepseek-flash」是按 Hermes 内部档位别名定的，
+#     而 DeepSeek 公开 API 上没有这个 id ⇒ 外部 agent 全都拿不到内核。）
 #   ★ 注意区分两件事：
 #     · **上游路由**（往哪个端点发）—— 按 "deepseek" 前缀判定，
 #       白名单外的模型**也要**路由到 DeepSeek 上游，否则请求会打错端点。
 #     · **内核注入**（要不要加内核/授权块）—— 按白名单判定，
 #       白名单外的模型**不注入**，与插件口径一致。
-_DEEPSEEK_MODELS_DEFAULT = "deepseek-flash"
+# ★★ 默认值是**空** = 允许所有 deepseek* 模型（减去拒绝名单）。
+#   ★★ 2026-11-07 实测事故：默认值原来是 "deepseek-flash" ——
+#      那是 Hermes 内部的档位别名，**DeepSeek 公开 API 上根本没有这个 model id**
+#      （公开的是 deepseek-chat / deepseek-reasoner）。
+#      ⇒ 用真实 model id 的所有外部 agent（Cursor / Claude Code / OpenCode /
+#        Cline / Codex CLI / openclaw …）请求会被路由到 DeepSeek 上游，
+#        但**不注入内核、不抬输出下限** ⇒ 效果为零，而且日志里看不出异常。
+#      这就是「换了十几种 agent 都没成功」的原因。
+#   ⇒ 现在：
+#      · JBP_DEEPSEEK_MODELS 没设 ⇒ 允许所有 deepseek* 模型
+#      · 设了 ⇒ 只认这份白名单（例：`deepseek-chat,deepseek-reasoner`）
+#      · JBP_DEEPSEEK_MODELS_DENY = 拒绝名单
+#        （默认 deepseek-v4-pro —— 保留当初「不要 v4-pro」的决定）
+#   ★ 代理**不读** HERMES_JAILBREAK_* —— 那是插件（Hermes 侧）的命名空间。
+#     混用会让这个给外部 agent 用的代理继承 Hermes 的 `deepseek-flash` 白名单，
+#     于是外部 agent 用 deepseek-chat 时依然拿不到内核（2026-11-07 实测）。
+_DEEPSEEK_MODELS_DEFAULT = ""
+_DEEPSEEK_MODELS_DENY_DEFAULT = "deepseek-v4-pro"
+
+
+def _deepseek_name_match(m: str, name: str) -> bool:
+    return m == name or m.startswith(name + ":") or m.endswith("/" + name) or name in m
 
 
 def deepseek_model_allowed(model: str) -> bool:
-    """该 DeepSeek 模型是否在内核生效白名单内。"""
+    """该 DeepSeek 模型是否在内核生效范围内。
+
+    ★ 拒绝名单**优先**：拒绝名单里的模型一律不注入内核。
+    """
     m = str(model or "").strip().lower()
     if not m or "deepseek" not in m:
         return False
-    raw = env_val("HERMES_JAILBREAK_DEEPSEEK_MODELS", _DEEPSEEK_MODELS_DEFAULT)
+    # ★★ 命名空间：**代理用自己的 JBP_* 变量，不读 HERMES_JAILBREAK_*。
+    #   ★★ 2026-11-07 实测事故（第二个坑）：`_env_file()` 优先取 HERMES_HOME/.env，
+    #      于是**装了 Hermes 的机器上，这个给外部 agent 用的代理会继承 Hermes 的
+    #      HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash** ⇒
+    #      外部 agent 用 deepseek-chat 请求时依然拿不到内核 ⇒ 效果为零。
+    #   ⇒ 代理与插件各用各的变量，互不串味。
+    deny_raw = env_val("JBP_DEEPSEEK_MODELS_DENY", _DEEPSEEK_MODELS_DENY_DEFAULT)
+    deny = [x.strip().lower() for x in str(deny_raw).split(",") if x.strip()]
+    if any(_deepseek_name_match(m, x) for x in deny):
+        return False
+    raw = env_val("JBP_DEEPSEEK_MODELS", _DEEPSEEK_MODELS_DEFAULT)
     wl = [x.strip().lower() for x in str(raw).split(",") if x.strip()]
     if not wl:
-        return False
-    return any(m == x or m.startswith(x + ":") or m.endswith("/" + x) or x in m
-               for x in wl)
+        # 默认：所有 deepseek* 都行（DeepSeek 公开 API 的真实 id 都在内）
+        return True
+    return any(_deepseek_name_match(m, x) for x in wl)
 
 
 def provider_of(body: dict, flavour: str = "openai") -> str:
@@ -342,7 +378,7 @@ def inject_anthropic(body: dict, kernel: str, effort: str) -> dict:
                 body["messages"][i] = dict(m, content=c.rstrip("\n") + AUTH_BLOCK)
             break
 
-    # 3) 思考旋钮：M3.1-Flash 只认 output_config.effort，budget_tokens 无效
+    # 3) 思考旋钮：只认 output_config.effort（adaptive），手动 budget_tokens 无效
     if adaptive_enabled():
         body["thinking"] = {"type": "adaptive"}
         oc = body.get("output_config")
@@ -907,6 +943,200 @@ class Handler(BaseHTTPRequestHandler):
 
 
 # ── 离线自测 ───────────────────────────────────────────────────────────
+def _self_test_end_to_end(check) -> bool:
+    """真实 HTTP 端到端自测：起一个桩上游 + 一个真代理，跑真实请求。
+
+    ★ 不联网、不需要 API key：桩上游是本机 127.0.0.1 上的一个 http.server。
+    ★ 覆盖的就是真实客户端会走的那条路径（do_POST → 组装 headers → forward）。
+    """
+    import urllib.error
+    import urllib.request
+
+    received: list[dict] = []
+
+    class _StubUpstream(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt, *args):
+            pass
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(n) if n else b""
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except Exception:
+                body = {}
+            received.append({
+                "path": self.path,
+                "headers": {k.lower(): v for k, v in self.headers.items()},
+                "body": body,
+            })
+            payload = json.dumps({
+                "id": "stub", "model": body.get("model", "stub"),
+                "choices": [{"index": 0, "message": {"role": "assistant",
+                                                     "content": "STUB_OK"},
+                             "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), _StubUpstream)
+    stub_port = stub.server_address[1]
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+
+    class _E2EHandler(Handler):
+        cfg = {
+            "multiround": "off",
+            "anthropic_upstream": f"http://127.0.0.1:{stub_port}",
+            "openai_upstream": f"http://127.0.0.1:{stub_port}",
+            "deepseek_upstream": f"http://127.0.0.1:{stub_port}",
+            "api_key": "",
+            "deepseek_api_key": "",
+            "profile": "strict",
+            "effort": "medium",
+            "min_output_tokens": 16000,
+            "deepseek_min_output_tokens": 32000,
+            "verbose": False,
+        }
+
+    prox = ThreadingHTTPServer(("127.0.0.1", 0), _E2EHandler)
+    prox_port = prox.server_address[1]
+    threading.Thread(target=prox.serve_forever, daemon=True).start()
+
+    # ★ 本机请求**必须绕过系统代理**：开发机上普遍开着 Clash / V2Ray 之类的
+    #   本地代理，urllib 会把 127.0.0.1 的请求也丢给代理 ⇒ 连不上本机。
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def _loopback_works() -> bool:
+        """本机回环能不能用？
+
+        ★ 必须区分两种「连不上」：
+          · Connection refused —— 端口上**根本没有监听**（环境限制，WSL/容器常见）
+            ⇒ 跳过，不算代码缺陷
+          · RemoteDisconnected —— 连上了、handler 死了 ⇒ **代理崩了** ⇒ 必须 FAIL
+        """
+        import socket
+        for port in (stub_port, prox_port):
+            try:
+                s = socket.create_connection(("127.0.0.1", port), timeout=5)
+                s.close()
+                return True
+            except Exception:
+                return False
+        return False
+
+    def _post(path: str, payload: dict, headers: dict | None = None):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{prox_port}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="POST")
+        try:
+            with opener.open(req, timeout=20) as resp:
+                return resp.status, resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", "replace")
+        except Exception as exc:
+            return None, f"{type(exc).__name__}: {exc}"
+
+    try:
+        if not _loopback_works():
+            print("  SKIP 端到端 HTTP 往返：本机回环不可用"
+                  "（Connection refused ⇒ 端口上根本没有监听，"
+                  "是环境限制，不是代理故障）")
+            return True
+
+        # ① OpenAI 形状 —— 真实 DeepSeek model id
+        received.clear()
+        status, text = _post("/v1/chat/completions", {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        }, {"Authorization": "Bearer client-key"})
+        check("OpenAI 请求拿到 HTTP 响应（不是断连）", status is not None,
+              f"status={status} err={text[:120]}")
+        check("OpenAI 请求返回 200", status == 200, f"status={status} body={text[:160]}")
+        check("OpenAI 响应体透传上游", "STUB_OK" in text, text[:160])
+
+        if received:
+            sent = received[-1]
+            flat = json.dumps(sent["body"], ensure_ascii=False)
+            check("上游收到内核", has_kernel(flat), flat[:200])
+            check("上游收到 32000 输出下限",
+                  int(sent["body"].get("max_tokens") or 0) >= 32000,
+                  f"max_tokens={sent['body'].get('max_tokens')}")
+            check("鉴权头被转发",
+                  sent["headers"].get("x-api-key") == "client-key"
+                  or "client-key" in sent["headers"].get("authorization", ""),
+                  str({k: v for k, v in sent["headers"].items()
+                       if k in ("x-api-key", "authorization")})[:160])
+
+        # ② ★★ 路由断言：DeepSeek 公开 API 的**真实 model id** 必须拿到内核。
+        #    （2026-11-07 实测事故：默认白名单只有 deepseek-flash ——
+        #      公开 API 上根本没有这个 id ⇒ 外部 agent 全都拿不到内核。）
+        for model in ("deepseek-chat", "deepseek-reasoner"):
+            received.clear()
+            status, text = _post("/v1/chat/completions", {
+                "model": model,
+                "messages": [{"role": "user", "content": "写个工具"}],
+            }, {"Authorization": "Bearer client-key"})
+            got = False
+            if received:
+                got = has_kernel(json.dumps(received[-1]["body"], ensure_ascii=False))
+            check(f"真实 model id {model} 拿到内核", got,
+                  f"status={status} received={len(received)}")
+
+        # ③ 拒绝名单里的模型不注入内核
+        received.clear()
+        status, text = _post("/v1/chat/completions", {
+            "model": "deepseek-v4-pro",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        }, {"Authorization": "Bearer client-key"})
+        skipped = True
+        if received:
+            skipped = not has_kernel(json.dumps(received[-1]["body"], ensure_ascii=False))
+        check("拒绝名单里的模型不注入内核（deepseek-v4-pro）", skipped,
+              f"status={status}")
+
+        # ④ Anthropic 形状
+        n0 = len(received)
+        status, text = _post("/anthropic/v1/messages", {
+            "model": "deepseek-chat", "max_tokens": 32000,
+            "system": "You are a helpful assistant.",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        }, {"x-api-key": "client-key"})
+        check("Anthropic 请求返回 200", status == 200, f"status={status} body={text[:160]}")
+        if len(received) > n0:
+            flat = json.dumps(received[-1]["body"], ensure_ascii=False)
+            check("Anthropic 请求带内核到上游", has_kernel(flat), flat[:200])
+
+        # ⑤ Responses 形状（Codex CLI 等）
+        status, text = _post("/v1/responses", {
+            "model": "deepseek-chat", "input": "写个工具",
+        }, {"Authorization": "Bearer client-key"})
+        check("Responses 请求返回 200", status == 200, f"status={status} body={text[:160]}")
+
+        # ⑥ 没有 key ⇒ 401，不是崩
+        status, text = _post("/v1/chat/completions", {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        })
+        check("无 key 时返回 401（不是崩溃）", status == 401,
+              f"status={status} body={text[:160]}")
+        return True
+    finally:
+        for srv in (prox, stub):
+            try:
+                srv.shutdown()
+                srv.server_close()
+            except Exception:
+                pass
+
+
 def self_test() -> int:
     """不发任何网络请求，验证注入逻辑。"""
     ok = True
@@ -1183,7 +1413,25 @@ def self_test() -> int:
                   {"type": "text", "text": "块数组文本"}]}]) == "块数组文本")
         check("空 messages 返回空串", MR.extract_last_user_text([]) == "")
 
+    # ── 端到端：真实 HTTP 请求路径 ──────────────────────────────────────
+    # ★ 为什么必须测这一段（2026-11-07 实测事故）：
+    #   原来的 self-test 只测**注入函数**，从不发一个真实请求，也从不检查
+    #   **按 model 名路由**。于是「公开 API 的真实 model id 拿不到内核」
+    #   这类缺陷完全隐形 —— 自测全绿，用户装了却零效果。
+    print("\n=== 端到端：真实 HTTP 请求 + model 名路由（桩上游，不联网、不需要 key）===")
+    try:
+        _self_test_end_to_end(check)
+    except Exception as exc:  # noqa: BLE001
+        check("端到端请求路径", False, f"{type(exc).__name__}: {exc}")
+    # ★ 结论行**中英双写**：英文 AGENTS.md 让 agent 认 `ALL PASSED`，
+    #   中文 AGENTS.md 让 agent 认 `结果: 全部通过`。
+    # ★ 成功标记**只在真通过时打印** —— 失败时也打印成功标记会让
+    #   agent 在自检失败时继续装（那比停下更糟）。
     print(f"\n结果: {'全部通过' if ok else '有失败项'}")
+    if ok:
+        print("ALL PASSED / 结果: 全部通过")
+    else:
+        print("SELF-TEST FAILED / 自检失败")
     return 0 if ok else 1
 
 

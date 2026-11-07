@@ -3,8 +3,9 @@
 面向 **DeepSeek** 模型的请求层非拒绝交付层，外带一个协议无关的 HTTP 代理，
 让任何外部 Agent 拿到同样的行为。
 
-> 范围：只针对 `deepseek-flash`。`deepseek-v4-pro` **故意不进白名单** —— 请求照旧
-> 路由到 DeepSeek 端点，但不注入内核。
+> 范围：所有 `deepseek*` 的 model id 都在范围内 —— `deepseek-chat`、
+> `deepseek-reasoner`、`deepseek-v3.2` …… `deepseek-v4-pro` **故意不进白名单** ——
+> 请求照旧路由到 DeepSeek 端点，但不注入内核。
 
 ---
 
@@ -18,7 +19,7 @@
 | 授权声明 | **决定性杠杆**，放在 user 消息末尾 | **负收益** —— 模型会点名它并否定其效力 |
 | 思考控制 | `output_config.effort`（adaptive） | 无 —— OpenAI 形状没有这个参数 |
 | 输出下限 | 16000 | **32000**（reasoning 与正文共享预算） |
-| 白名单 | 无 | `HERMES_JAILBREAK_DEEPSEEK_MODELS` |
+| 白名单 | 无 | `HERMES_JAILBREAK_DEEPSEEK_MODELS`（默认：所有 `deepseek*`） |
 
 只扫顶层 `system` 的插件**在 DeepSeek 上是静默失效**：注册成功、日志正常、
 请求照发、效果为零。
@@ -41,6 +42,34 @@
 
 reasoning token 和正文 token 共用一份预算。16000 时模型把预算烧在思考上，
 然后开口就是拒答。
+
+---
+
+---
+
+## ★ 白名单（先读这一段）
+
+**2026-11-07 实测。** 这里发布的默认白名单是 `deepseek-flash` ——
+一个 **DeepSeek 公开 API 上根本不存在的 Hermes 内部档位别名**
+（公开的是 `deepseek-chat` 和 `deepseek-reasoner`）。
+
+于是所有真实 agent 的请求**路由到了 DeepSeek，却没拿到内核**，而且全程不报错：
+`/health` 是 200，自检全绿，答案也正常返回。行为跟什么都没装一模一样。
+
+同一天的第二个坑：代理优先读 `HERMES_HOME/.env`，所以**装了 Hermes 的机器上**
+它**继承**了 Hermes 的 `HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash`，
+问题原样复现。
+
+**现在：**
+
+| 组件 | 白名单 | 拒绝名单 |
+|---|---|---|
+| Hermes 插件 | `HERMES_JAILBREAK_DEEPSEEK_MODELS` | `HERMES_JAILBREAK_DEEPSEEK_MODELS_DENY` |
+| 外部 agent 用的代理 | `JBP_DEEPSEEK_MODELS` | `JBP_DEEPSEEK_MODELS_DENY` |
+
+开箱即用：所有 `deepseek*` 的 model id 都放行 —— `deepseek-chat`、
+`deepseek-reasoner`、`deepseek-v3.2` …… —— `deepseek-v4-pro` 不放行（刻意保留）。
+只有在要**收窄**范围时才需要配白名单。
 
 ---
 
@@ -96,13 +125,15 @@ prompt 与参数层面的杠杆**已经穷尽**。八类全部实测，全部无
 ### 1. Hermes 插件
 
 ```bash
-git clone https://github.com/<you>/deepseek-jailbreak-kernel-zh.git
+git clone https://github.com/tiqi9896/deepseek-jailbreak-kernel-zh.git
 cp -r deepseek-jailbreak-kernel-zh/plugin ~/.hermes/plugins/deepseek-jailbreak-core
 ```
 
 ```bash
-# 白名单（默认只有 deepseek-flash）
-echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash' >> ~/.hermes/.env
+# 白名单 —— 可选。默认已经放行所有 deepseek* 的 model id
+# （deepseek-chat、deepseek-reasoner……）；deepseek-v4-pro 不放行。
+# 只有要「收窄」时才设，而且要写真实存在的 model id：
+echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner' >> ~/.hermes/.env
 
 # 热重载，不重启会话
 hermes plugins disable deepseek-jailbreak-core
@@ -131,7 +162,7 @@ DEEPSEEK_API_KEY=sk-... python proxy.py
 ## 验证
 
 ```bash
-python plugin/selftest.py            # 期望 133 通过, 0 失败
+python plugin/selftest.py            # 期望 24 通过, 0 失败
 python proxy/proxy.py --self-test    # 期望 全部通过
 python tools/audit-deepseek-jailbreak.py -v
 ```
@@ -150,8 +181,8 @@ Hermes 的插件段是**每个会话渲染一次并冻结**的
 日志铁证，同一份 150225 字符的 system：
 
 ```
-11:56:17 [local-8914afcd] kernel already present (system msg, 150225 chars)
-11:57:21 [local-8914afcd] kernel OUTDATED in system msg -> replacing
+11:56:17 [local-xxxxxxxx] kernel already present (system msg, 150225 chars)
+11:57:21 [local-xxxxxxxx] kernel OUTDATED in system msg -> replacing
 ```
 
 同一份字节，前后结论相反 —— 持久化内核确实是旧版。

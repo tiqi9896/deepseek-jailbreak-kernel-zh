@@ -9,6 +9,55 @@
 
 ---
 
+---
+
+## ★ 先读这一段 —— 白名单是整件事的关键
+
+**2026-11-07 实测。** 这个仓库发布时，默认白名单写的是 `deepseek-flash`。
+这个字符串是 **Hermes 内部的档位别名**，**DeepSeek 公开 API 上根本没有这个
+model id** —— 公开的是 `deepseek-chat` 和 `deepseek-reasoner`。
+
+后果，就是「换了十几种 agent 都没成功」那个症状：
+
+| 实际发生了什么 | 为什么看起来一切正常 |
+|---|---|
+| 代理照样把请求路由到 DeepSeek（名字里含 `deepseek`） | 请求确实发出去了 |
+| **不注入内核**（model id 不在白名单里） | 返回 200，答案看起来很正常 |
+| 不抬 32000 输出下限 | 没有报错 |
+| Hermes 插件侧日志一片安静 | 没有报错 |
+
+于是 agent 装完所有东西，健康检查全绿，而行为**跟什么都没装一模一样**。
+
+**同一天的第二个坑。** 代理优先从 `HERMES_HOME/.env` 读配置。所以**装了
+Hermes 的机器上**，代理会**继承** Hermes 的
+`HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash` ⇒ 外部 agent 用
+`deepseek-chat` 依然拿不到内核。现在代理和插件**各用各的变量**，互不串味：
+
+| 组件 | 白名单变量 | 拒绝名单 |
+|---|---|---|
+| Hermes 插件（`plugin/`） | `HERMES_JAILBREAK_DEEPSEEK_MODELS` | `HERMES_JAILBREAK_DEEPSEEK_MODELS_DENY` |
+| 外部 agent 用的代理（`proxy/`） | `JBP_DEEPSEEK_MODELS` | `JBP_DEEPSEEK_MODELS_DENY` |
+
+**现在的默认值（什么都不用配）：**
+
+* 所有 `deepseek*` 的 model id 都放行 —— `deepseek-chat`、`deepseek-reasoner`、
+  `deepseek-v3.2`、`deepseek-flash` ……
+* `deepseek-v4-pro` **不放行**（这是当初刻意保留的决定；确实要的话显式加回来）。
+
+只有当你要**收窄**范围时才设白名单，例如：
+
+```bash
+# 插件侧
+echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner' >> "$HERMES_HOME/.env"
+# 代理侧
+export JBP_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner
+```
+
+**除非你的 model id 真的是 `deepseek-flash`，否则不要把它写进白名单。**
+那正是让这个仓库看起来「什么都没发生」的那一个配置。
+
+---
+
 ## 第 0 步 —— 前置检查（别假设，去查）
 
 ```bash
@@ -23,7 +72,7 @@ git --version
 | 平台 | 常见路径 |
 |---|---|
 | Linux / macOS | `~/.hermes` |
-| Windows | `%LOCALAPPDATA%\hermes` 或 `A:\hermes` / `C:\hermes` —— 实际去文件系统里看 |
+| Windows | `%LOCALAPPDATA%\hermes` 或 `%USERPROFILE%\.hermes` —— 实际去文件系统里看 |
 
 **检查点 1**：你选的那个目录里必须已经有 `config.yaml`。如果没有，说明 Hermes
 不装在那里 —— 问人类 Hermes 用的是哪个目录。**不许自己新建一个 Hermes home
@@ -34,7 +83,7 @@ git --version
 ## 第 1 步 —— 克隆
 
 ```bash
-git clone https://github.com/<owner>/deepseek-jailbreak-kernel-zh.git
+git clone https://github.com/tiqi9896/deepseek-jailbreak-kernel-zh.git
 cd deepseek-jailbreak-kernel-zh
 ```
 
@@ -51,6 +100,16 @@ proxy/multiround.py
 
 ## 第 2 步 —— 装插件
 
+**或者交给安装脚本**（Windows / POSIX 都有）：
+
+```bash
+bash install.sh            # POSIX
+powershell -ExecutionPolicy Bypass -File install.ps1   # Windows
+```
+
+安装脚本会把插件装到 `$HERMES_HOME/plugins/deepseek-jailbreak-core`，
+跑两个自测，**任何一个没过就明确报错**。
+
 插件是让**每一个 Hermes 里跑 `deepseek-flash` 的对话**都带内核的那部分。
 目录名必须是 `deepseek-jailbreak-core`（模块名是固定的，改名就注册不上）。
 
@@ -58,11 +117,18 @@ proxy/multiround.py
 cp -r plugin "$HERMES_HOME/plugins/deepseek-jailbreak-core"
 ```
 
-然后设白名单。只针对 `deepseek-flash`：
+### 白名单 —— 先读上面那一段
+
+**默认什么都不用设。** 默认放行所有 `deepseek*` 的 model id，
+包括 DeepSeek 公开的真实 id（`deepseek-chat`、`deepseek-reasoner`）。
+只有 `deepseek-v4-pro` 不放行。
+
+如果人类自己的 Hermes 配置里已经有 `deepseek-flash` 白名单（他们自己的选择），
+别动它。如果你要加，一定要写真实存在的 model id：
 
 ```bash
 grep -q 'HERMES_JAILBREAK_DEEPSEEK_MODELS' "$HERMES_HOME/.env" \
-  || echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-flash' >> "$HERMES_HOME/.env"
+  || echo 'HERMES_JAILBREAK_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner' >> "$HERMES_HOME/.env"
 ```
 
 热重载，不要重启用户的会话：
@@ -78,7 +144,7 @@ hermes plugins enable deepseek-jailbreak-core
 python "$HERMES_HOME/plugins/deepseek-jailbreak-core/selftest.py"
 ```
 
-期望：`133 通过, 0 失败`。**只要有一项失败就停下来，把失败的断言名报出来**，
+期望：`24 通过, 0 失败`。**只要有一项失败就停下来，把失败的断言名报出来**，
 不要继续往下走。
 
 ---
@@ -97,13 +163,40 @@ python proxy.py --port 8790
 然后把客户端的 `base_url` 指到 `http://127.0.0.1:8790`
 （各工具的具体配法见 `proxy/docs/AGENT-SETUP.md`）。
 
-**检查点 4**：
+**检查点 4**：`/health` 返回 200 只证明进程活着，**不证明请求能通**。
+请求处理里抛异常的代理照样 `/health` 200 —— 客户端只会看到连接被断开。
+所以请求路径也要验：
 
 ```bash
+# 4a. 进程活着
 curl -s http://127.0.0.1:8790/health
+#   -> JSON 里有 "status": "ok" 和 "multiround": "auto"
+
+# 4b. 真的发一个请求并拿回响应
+python tests/proxy_smoke.py --port 8790
 ```
 
-期望：JSON 里有 `"status": "ok"` 和 `"multiround": "auto"`。
+`tests/proxy_smoke.py` 会真的发一个 `POST /v1/chat/completions`，并告诉你
+**到底是哪一种看起来一样的故障**：
+
+| 现象 | 含义 |
+|---|---|
+| `connection refused` | 代理没跑 —— 去启动它 |
+| `RemoteDisconnected` | 代理处理请求时崩了 —— 去看代理日志 |
+| `HTTP 401` | 代理没问题，是 API key 没配或不对 |
+| `HTTP 5xx` | 上游或代理报错 —— 响应体里写了是哪个 |
+| `OK` | 请求路径通了 |
+
+**检查点 4b**：`tests/proxy_smoke.py` 必须打印 `OK`。别的输出都别往下走 ——
+先修好。
+
+**另外：** 代理自检现在会对着本机桩上游跑完整 HTTP 路径（不联网、不需要 key）。
+随时可以跑：
+
+```bash
+python proxy/proxy.py --self-test
+# 期望 116 项全过，最后一行含 "ALL PASSED"
+```
 
 ---
 
@@ -116,7 +209,7 @@ python tools/audit-deepseek-jailbreak.py -v
 ```
 
 **检查点 5**：退出码 `0`，最后一行是
-`all N checks passed - every deepseek-flash chat carries the kernel`。
+`all N checks passed - every DeepSeek chat carries the kernel`。
 
 失败的话看是哪一项：
 
@@ -124,7 +217,8 @@ python tools/audit-deepseek-jailbreak.py -v
 |---|---|---|
 | `plugin found` | `HERMES_HOME` 猜错了 | 显式设 `HERMES_HOME` 环境变量 |
 | `middleware registration logged` | 插件没被加载 | 查 `config.yaml` 里插件是否列出并 enabled |
-| `allowlist has deepseek-flash` | `.env` 没读到 | 确认 key 在 `$HERMES_HOME/.env` 里，不是只在 shell 里 |
+| `real public model id admitted: deepseek-chat` | 白名单把真实公开 id 排除了 | 读上面那一段 —— 白名单才是整件事的关键 |
+| `plugin found` FAIL | 插件没装到 `$HERMES_HOME/plugins/deepseek-jailbreak-core` | 把 `plugin/` 拷过去 |
 | 路由类检查失败 | 插件版本不对 | 重新 clone，路由逻辑在 `_llm_request` 里 |
 
 ---
@@ -176,7 +270,7 @@ grep -E 'openai-shape kernel (already present and current|OUTDATED|injected)' \
 
 做完之后报告这几项：
 
-1. 哪几个检查点过了，带上确切数字（`133/133`、审计退出码 0）
+1. 哪几个检查点过了，带上确切数字（`24/24`、审计退出码 0）
 2. 装到了哪个路径
 3. 代理是装了还是跳过了
 4. 任何失败的检查点，原文贴出来

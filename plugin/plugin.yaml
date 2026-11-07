@@ -1,17 +1,17 @@
 name: deepseek-jailbreak-core
-version: "1.0.0"
-description: "DeepSeek 破甲内核：会话级模式 off/slim/on/full + 内核档 core/research/creative/max深度 effort（output_config.effort，修正 budget_tokens 对 M3.1-Flash 无效的问题）+ 顶层 system 正确重建。内核文案逐字继承 hermes-jailbreak-kernel（MIT, Enchanted0911）。"
-author: "本地适配（内核文案 MIT 继承自 Enchanted0911/hermes-jailbreak-kernel）"
+version: "1.1.0"
+description: "DeepSeek 破甲内核：会话级模式 off/slim/on/full + 内核档 core/research/creative/max + 面向 OpenAI 形状 messages[] 的独立注入器（顶层 system 字段在 DeepSeek 上是静默空操作）。DeepSeek 的 OpenAI 形状没有 effort 参数，思考档由 model id 决定；真正影响交付的是 32000 的输出下限。内核文案逐字继承 hermes-jailbreak-kernel（MIT, Enchanted0911）。"
+author: "tiqi9896（内核文案 MIT 继承自 Enchanted0911/hermes-jailbreak-kernel）"
 provides_tools: []
 provides_hooks: []
 provides_middleware:
   - llm_request
 license: MIT
-homepage: https://github.com/Enchanted0911/hermes-jailbreak-kernel
+homepage: https://github.com/tiqi9896/deepseek-jailbreak-kernel
 tags:
   - deepseek
   - jailbreak
   - prompt-injection
   - system-prompt
-  - reasoning-effort
+  - model-allowlist
 requires_hermes: ">=0.19"

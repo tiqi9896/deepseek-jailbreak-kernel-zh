@@ -100,8 +100,8 @@ Hermes 的插件段是**每个会话渲染一次并冻结**的
 旧版本**。同一份 150225 字符的 prompt 上观测到：
 
 ```
-11:56:17 [local-8914afcd] kernel already present (system msg, 150225 chars)
-11:57:21 [local-8914afcd] kernel OUTDATED in system msg -> replacing
+11:56:17 [local-xxxxxxxx] kernel already present (system msg, 150225 chars)
+11:57:21 [local-xxxxxxxx] kernel OUTDATED in system msg -> replacing
 ```
 
 同一份字节，前后结论相反 —— 持久化内核确实是旧版。
