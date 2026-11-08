@@ -115,16 +115,80 @@ _ADULT_RE = re.compile(
 )
 
 
+# ★★ 2026-11-08：成人请求判定必须看**意图**，不能只看字面。
+#   实测事故：用户问「我用 HY4 做其他任务，不会又写成色情小说吧？」
+#   —— 句子里有「色情小说」四个字 ⇒ 旧判定 adult=True ⇒ **成人条款被注入**
+#      ⇒ 正常业务请求反而被带跑（这正是用户担心的那个场景）。
+#   ⇒ 三段式：剥策略样板行 → 子句级否定/元语境排除 → 全文兜底。
+
+#: ★ 策略样板行（我的注入文本 / 策略声明）——检测前整行剥离
+_META_LINE = re.compile(
+    r"(交付范围确认|授权状态|授权范围内|无限制条款|不得削减能力|作用范围|"
+    r"开头禁止拒绝|复述本声明|交付物必须就是|本条请求|本条不授权|本条仅|"
+    r"不得引入|不得因为本条|仅当本条|才适用|角色均为成年虚构人物|"
+    r"禁止把成人请求改写|标题[：:]|正文里不要复述|不设主题限制|自行补齐|"
+    r"不要反问|不要在正文写|第一行就是标题|第二行直接进正文|"
+    r"用户要求露骨描写|不用暗示代替描写|正文至少\s*\d+\s*字|从头写到尾|"
+    r"写完，不\s*fade|角色均为成年人|露骨写完|"
+    r"^\s*[-*·]\s*(目标环境|授权状态|交付要求|无限制条款|不得削减能力|不得反问|标题|正文))",
+    re.M)
+
+#: ★ 子句级否定 / 元语境标记（该子句里的成人词是**讨论**，不是请求）
+_ADULT_META_CTX = re.compile(
+    r"(不要|别|不得|不许|禁止|避免|防止|不会|不再|不能|勿|不该|不宜|"
+    r"是否|会不会|如何|怎么|为何|讨论|误判|过滤|被过滤|屏蔽|审查|拦截|"
+    r"检测|排查|修复|加固|拦下|挡住|删掉|替换成|变成|变成色情|"
+    r"乱写|跑偏|污染|漂移|杜绝|避免出现|会不会又|会不会变)")
+
+
+def _strip_meta_lines(text: str) -> str:
+    """剥离策略样板行（我的注入文本、策略声明、引用块）。"""
+    body = text or ""
+    if not body.strip():
+        return body
+    lines = []
+    for line in body.split("\n"):
+        s = line.strip()
+        if s.startswith(">"):
+            continue
+        if s and _META_LINE.search(s):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _is_adult_request(text: str) -> bool:
+    """★ 成人请求的**意图**判定（三段式）。"""
+    try:
+        body = text or ""
+        if not body.strip():
+            return False
+        core = _strip_meta_lines(body)
+        clauses = re.split(r"[，,。；;：:！!？?\n、⇒→]", core)
+        meta_only = False
+        for c in clauses:
+            if not c.strip():
+                continue
+            if not _ADULT_RE.search(c):
+                continue
+            if _ADULT_META_CTX.search(c):
+                meta_only = True
+                continue
+            return True
+        if meta_only:
+            return False
+        return bool(_ADULT_RE.search(core))
+    except Exception:
+        return False
+
+
 def request_is_adult(text: str) -> bool:
     """用户这条请求本身是不是成人/情色内容。
 
     ★ 只看**用户请求**文本，不看 system、不看历史。
       判为成人 ⇒ 成人条款出现；判为非成人 ⇒ 成人条款**完全不出现**。
     """
-    try:
-        return bool(_ADULT_RE.search(text or ""))
-    except Exception:
-        return False
+    return _is_adult_request(text)
 
 
 def _user_text(body) -> str:
