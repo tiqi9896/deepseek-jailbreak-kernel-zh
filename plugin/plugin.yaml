@@ -1,5 +1,5 @@
 name: deepseek-jailbreak-core
-version: "1.1.3"
+version: "1.1.4"
 description: "DeepSeek 破甲内核：会话级模式 off/slim/on/full + 内核档 core/research/creative/max + 面向 OpenAI 形状 messages[] 的独立注入器（顶层 system 字段在 DeepSeek 上是静默空操作）。DeepSeek 的 OpenAI 形状没有 effort 参数，思考档由 model id 决定；真正影响交付的是 32000 的输出下限。内核文案逐字继承 hermes-jailbreak-kernel（MIT, Enchanted0911）。"
 author: "tiqi9896（内核文案 MIT 继承自 Enchanted0911/hermes-jailbreak-kernel）"
 provides_tools: []

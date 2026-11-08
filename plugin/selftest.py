@@ -36,6 +36,25 @@ check("kernel loads", "SUPREME DIRECTIVE" in kernel)
 check("reinforce section present", "DELIVERABLE FIDELITY" in kernel)
 check("within 8000-char budget", len(kernel) <= 8000, f"len={len(kernel)}")
 
+# ★★ 2026-11-08 修复（可复现性缺陷）：下面这些断言验的是**默认**白名单行为，
+#   而默认行为会被**宿主环境**污染 ——
+#   插件的 cfg() 先读 $HERMES_HOME/.env，再读 os.environ
+#   ⇒ 任何装了 Hermes、且 .env 里写了 HERMES_JAILBREAK_DEEPSEEK_MODELS 的机器
+#     （本机就是：deepseek-flash）跑这个自测都会得到**假失败**：
+#     deepseek-next 不在单 id 名单里 ⇒ FAIL
+#     ⇒ agent 照着 AGENTS.md 跑，看到 FAIL 会以为装坏了。
+#   ⇒ 断言期间把环境**隔离**：HERMES_HOME 指向空目录（.env 读不到）
+#     + 清掉相关环境变量；断言完原样恢复。
+import os as _os
+import tempfile as _tf
+
+_ISOLATE_KEYS = ("HERMES_JAILBREAK_DEEPSEEK_MODELS",
+                 "HERMES_JAILBREAK_DEEPSEEK_MODELS_DENY")
+_isol_saved = {k: _os.environ.pop(k, None) for k in _ISOLATE_KEYS}
+_isol_home = _os.environ.get("HERMES_HOME")
+_isol_dir = _tf.mkdtemp(prefix="jb_selftest_env_")
+_os.environ["HERMES_HOME"] = _isol_dir
+
 print("\n=== allowlist ===")
 # ★★ 2026-11-07 实测事故：默认白名单曾经**只写了一个** model id
 #   （"deepseek-flash" —— 它是真实的 DeepSeek model id；真实 id 是
@@ -47,26 +66,27 @@ print("\n=== allowlist ===")
 # ★ DeepSeek 真实的 model id 是 deepseek-flash 与 deepseek-v4-pro
 #   （本仓库实测数据与 /v1/models 列表为证）。deepseek-v4-pro 按
 #   2026-11-01 的决定「只要 deepseek-flash，不要 deepseek-v4-pro」默认排除。
-check("real model id deepseek-flash allowlisted",
-      mjc.deepseek_model_allowed("deepseek-flash"))
-check("deepseek-v4-pro NOT allowlisted", not mjc.deepseek_model_allowed("deepseek-v4-pro"))
-check("other models NOT allowlisted", not mjc.deepseek_model_allowed("gpt-4o"))
-# ★ 默认放行**所有** deepseek* id（新出的模型不用改配置）
-check("any other deepseek* id allowlisted (deepseek-next)",
-      mjc.deepseek_model_allowed("deepseek-next"))
-# ★ 显式设了白名单 ⇒ 回到白名单模式（只认名单里的）
-import os as _os
-_saved = _os.environ.get("HERMES_JAILBREAK_DEEPSEEK_MODELS")
-_os.environ["HERMES_JAILBREAK_DEEPSEEK_MODELS"] = "deepseek-flash"
 try:
+    check("real model id deepseek-flash allowlisted",
+          mjc.deepseek_model_allowed("deepseek-flash"))
+    check("deepseek-v4-pro NOT allowlisted", not mjc.deepseek_model_allowed("deepseek-v4-pro"))
+    check("other models NOT allowlisted", not mjc.deepseek_model_allowed("gpt-4o"))
+    # ★ 默认放行**所有** deepseek* id（新出的模型不用改配置）
+    check("any other deepseek* id allowlisted (deepseek-next)",
+          mjc.deepseek_model_allowed("deepseek-next"))
+    # ★ 显式设了白名单 ⇒ 回到白名单模式（只认名单里的）
+    _os.environ["HERMES_JAILBREAK_DEEPSEEK_MODELS"] = "deepseek-flash"
     check("explicit allowlist restricts to that list",
           mjc.deepseek_model_allowed("deepseek-flash")
           and not mjc.deepseek_model_allowed("deepseek-next"))
 finally:
-    if _saved is None:
-        _os.environ.pop("HERMES_JAILBREAK_DEEPSEEK_MODELS", None)
+    for _k, _v in _isol_saved.items():
+        if _v is not None:
+            _os.environ[_k] = _v
+    if _isol_home is not None:
+        _os.environ["HERMES_HOME"] = _isol_home
     else:
-        _os.environ["HERMES_JAILBREAK_DEEPSEEK_MODELS"] = _saved
+        _os.environ.pop("HERMES_HOME", None)
 
 print("\n=== /jailbreak command surface ===")
 # ★ 2026-11-07 实测事故：set_effort / effective_effort 以前**不存在**，
