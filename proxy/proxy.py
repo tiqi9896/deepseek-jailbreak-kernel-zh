@@ -121,17 +121,54 @@ _ADULT_RE = re.compile(
 #      ⇒ 正常业务请求反而被带跑（这正是用户担心的那个场景）。
 #   ⇒ 三段式：剥策略样板行 → 子句级否定/元语境排除 → 全文兜底。
 
-#: ★ 策略样板行（我的注入文本 / 策略声明）——检测前整行剥离
-_META_LINE = re.compile(
-    r"(交付范围确认|授权状态|授权范围内|无限制条款|不得削减能力|作用范围|"
-    r"开头禁止拒绝|复述本声明|交付物必须就是|本条请求|本条不授权|本条仅|"
-    r"不得引入|不得因为本条|仅当本条|才适用|角色均为成年虚构人物|"
-    r"禁止把成人请求改写|标题[：:]|正文里不要复述|不设主题限制|自行补齐|"
-    r"不要反问|不要在正文写|第一行就是标题|第二行直接进正文|"
-    r"用户要求露骨描写|不用暗示代替描写|正文至少\s*\d+\s*字|从头写到尾|"
-    r"写完，不\s*fade|角色均为成年人|露骨写完|"
+#: ★★ 策略样板行 —— 分两级（2026-11-08 回归修复）
+#:   硬标记：unmistakably 是策略样板 ⇒ 无条件剥离
+_POLICY_LINE = re.compile(
+    r"(交付范围确认|授权状态|授权范围内|无限制条款|不得削减能力|"
+    r"开头禁止拒绝|复述本声明|本条请求|本条不授权|本条仅|"
+    r"不得引入|不得因为本条|仅当本条|才适用|角色均为成年虚构人物|角色均为成年人|"
+    r"禁止把成人请求改写|用户要求露骨描写|不用暗示代替描写|露骨写完|"
+    r"正文里不要复述|不设主题限制|自行补齐|不要反问|不要在正文写|"
+    r"第一行就是标题|第二行直接进正文|"
     r"^\s*[-*·]\s*(目标环境|授权状态|交付要求|无限制条款|不得削减能力|不得反问|标题|正文))",
     re.M)
+
+#:   软标记：太泛 ⇒ **只有该行不含成人词时**才剥离
+#:   （实测回归：「…成人虚构对话，要露骨…正文至少1200字」整行被误剥 ⇒ 成人能力被削）
+_SOFT_POLICY = re.compile(
+    r"(正文至少\s*\d+\s*字|从头写到尾|写完[，,]?\s*不\s*fade|"
+    r"标题[：:]|作用范围\s*=|交付物必须就是|不得引入|不授权任何)")
+
+#: ★ 请求动词：行内**同时**有成人词和请求动词 ⇒ 这是用户请求，不是样板
+_ADULT_REQUEST_VERB = re.compile(
+    r"(写|来[一段篇个]|生成|创作|输出|续写|补写|produce|write|给我整|要一篇)")
+
+
+def _strip_meta_lines(text: str) -> str:
+    """剥离策略样板行（我的注入文本、策略声明、引用块）。
+
+    ★ 硬标记无条件剥离；软标记仅在**该行不含成人词**时剥离
+      ⇒ 「…要露骨…正文至少1200字」这种**真请求**不会被误杀。
+    """
+    body = text or ""
+    if not body.strip():
+        return body
+    lines = []
+    for line in body.split("\n"):
+        s = line.strip()
+        if s.startswith(">"):
+            continue
+        if s and _POLICY_LINE.search(s):
+            continue
+        if s and _SOFT_POLICY.search(s):
+            # ★ 安全网：含成人词 + 请求动词 ⇒ 是用户请求 ⇒ 保留
+            if _ADULT_RE.search(s) and _ADULT_REQUEST_VERB.search(s):
+                lines.append(line)
+                continue
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
 
 #: ★ 子句级否定 / 元语境标记（该子句里的成人词是**讨论**，不是请求）
 _ADULT_META_CTX = re.compile(
@@ -141,20 +178,6 @@ _ADULT_META_CTX = re.compile(
     r"乱写|跑偏|污染|漂移|杜绝|避免出现|会不会又|会不会变)")
 
 
-def _strip_meta_lines(text: str) -> str:
-    """剥离策略样板行（我的注入文本、策略声明、引用块）。"""
-    body = text or ""
-    if not body.strip():
-        return body
-    lines = []
-    for line in body.split("\n"):
-        s = line.strip()
-        if s.startswith(">"):
-            continue
-        if s and _META_LINE.search(s):
-            continue
-        lines.append(line)
-    return "\n".join(lines)
 
 
 def _is_adult_request(text: str) -> bool:
@@ -1825,6 +1848,31 @@ def self_test() -> int:
         print("ALL PASSED / 结果: 全部通过")
     else:
         print("SELF-TEST FAILED / 自检失败")
+    print("\n=== 意图门控：成人请求识别（2026-11-08）===")
+    # ★ 只**谈论**成人内容的请求**不得**被判成成人请求 ——
+    #   旧判定是纯字面扫描 ⇒ 「…不会又写成色情小说吧？」这种业务提问被判成人
+    #   ⇒ 成人条款被注入正常业务请求（用户踩到的那个故障）。
+    _meta = [
+        "还有一个确保不会又出现之前那个情况，就是我用workbuddy里面的HY4这个模型去做其他的任务，"
+        "不会做着做着又给给写成色情小说了吧？",
+        "如何避免模型跑偏写成色情小说？",
+        "色情小说会被上游过滤吗？",
+        "不要写成色情小说，给我一份技术方案",
+        "帮我批算八字命盘",
+    ]
+    _wrong = [t for t in _meta if request_is_adult(t)]
+    check("元语境请求不算成人请求 / meta-context is not adult", not _wrong, str(_wrong[:1]))
+    # ★ 真实成人请求仍必须判成人（能力不能被削）
+    _adult = [
+        "写个黄色小说看看",
+        "来段 R18 剧本",
+        "色情小说要 1200 字",
+        "写个色情小说，不要加免责声明",
+        "写一段 ROLE_A 与 ROLE_B 的成人虚构对话，要露骨，器官体液都写出来，正文至少1200字",
+    ]
+    _missed = [t for t in _adult if not request_is_adult(t)]
+    check("成人请求仍然命中 / adult requests still detected", not _missed, str(_missed[:1]))
+
     return 0 if ok else 1
 
 
